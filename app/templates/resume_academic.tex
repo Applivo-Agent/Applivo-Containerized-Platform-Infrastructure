@@ -1,0 +1,79 @@
+%------------------------
+% Latex CV Template for COS Northeastern University Faculty
+% Author: Zoe Kearney
+% Format: https://www.overleaf.com/latex/templates/coles-resume-template/qhpynjcvjpcj
+% License: LaTeX Project Public License 1.3c
+%------------------------
+
+\documentclass[a4paper,9pt]{extarticle}
+
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{lipsum}
+\usepackage{changepage}
+
+\setlist{noitemsep}
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{\baselineskip}{\baselineskip}
+
+\newenvironment{subs}
+  {\adjustwidth{2em}{0pt}}
+  {\endadjustwidth}
+
+\begin{document}
+\pagestyle{empty}
+
+\begin{center}
+    \textbf{\Large YOUR NAME}\\[3pt]
+    \textbf{Curriculum Vitae}\\[1pt]
+    City, State | \href{email@example.com}{email@example.com} | \href{https://linkedin.com/in/username}{LinkedIn}
+\end{center}
+
+\section*{EDUCATION \& EMPLOYMENT HISTORY}
+    \textbf{Degree Name} \\
+    Year of completion: \\
+    Institution \\
+    Department \\
+    Description or focus area
+
+    \textbf{Position Title} \\
+    Time Period: \\
+    Institution \\
+    Department \\
+    Responsibilities and achievements
+
+\section*{PUBLICATIONS}
+    \subsection*{Reviewed Articles}
+        \item Paper title, Journal Name, Year
+    \subsection*{Books}
+        \item Book title, Publisher, Year
+    \subsection*{Conference Proceedings}
+        \item Conference paper, Year
+
+\section*{GRANTS}
+    \subsection*{External Grants}
+    \begin{subs}
+        \subsubsection*{Funded}
+            Proposal Title: \\
+            Funding Agency: \\
+            Role: \\
+            Period:
+    \end{subs}
+
+\section*{TEACHING AND ADVISING}
+    \subsection*{Courses}
+        Course Title, Term Year
+    \subsection*{Supervision}
+        Student Name, Level, Year
+
+\section*{SERVICE \& PROFESSIONAL DEVELOPMENT}
+    \subsection*{Service to the Institution}
+        Department/College/University service
+    \subsection*{Professional Development}
+        Conferences, certifications
+
+\end{document}

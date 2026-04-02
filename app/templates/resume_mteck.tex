@@ -1,0 +1,194 @@
+%%%%
+% MTecknology's Resume
+%%%%
+% Author: Michael Lustfield
+% License: CC-BY-4
+% - https://creativecommons.org/licenses/by/4.0/legalcode.txt
+%%%%
+
+\documentclass[letterpaper,10pt]{article}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{bookmark}
+\usepackage{lastpage}
+\usepackage{CormorantGaramond}
+\usepackage{charter}
+\usepackage{xcolor}
+
+% Colors
+\definecolor{accentTitle}{RGB}{0,0,0}
+\definecolor{accentText}{RGB}{0,0,0}
+\definecolor{accentLine}{RGB}{0,0,0}
+
+% Page Setup
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+renewcommand{\headrulewidth}{0pt}
+renewcommand{\footrulewidth}{0pt}
+\urlstyle{same}
+
+% Margins
+\addtolength{\oddsidemargin}{-0.7in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1.19in}
+\addtolength{\topmargin}{-0.7in}
+\addtolength{\textheight}{1.4in}
+
+\setlength{\multicolsep}{-3.0pt}
+\setlength{\columnsep}{-1pt}
+\raggedbottom
+\raggedright
+
+% ATS Readable
+\input glyphtounicode
+\pdfgentounicode=1
+
+% Commands
+\newcommand{\documentTitle}[2]{
+  \begin{center}
+    {\Huge\color{accentTitle} #1}
+    \vspace{10pt}
+    {\color{accentLine} \hrule}
+    \vspace{2pt}
+    \footnotesized{#2}
+    \vspace{2pt}
+    {\color{accentLine} \hrule}
+  \end{center}
+}
+
+\newcommand{\numberedPages}{
+  \documentFooter{\thepage/\pageref{LastPage}}
+}
+
+\titleformat{\section}{
+  \vspace{-5pt}
+  \color{accentText}
+  \raggedright\large\bfseries
+}{}{0em}{}[\color{accentLine}\titlerule]
+
+\newcommand{\tinysection}[1]{
+  \phantomsection
+  \addcontentsline{toc}{section}{#1}
+  {\large{\bfseries\color{accentText}#1} {\color{accentLine} |}}
+}
+
+\newcommand{\heading}[2]{
+  \hspace{10pt}#1\hfill#2\\
+}
+
+\newcommand{\headingBf}[2]{
+  \heading{\textbf{#1}}{\textbf{#2}}
+}
+
+\newcommand{\headingIt}[2]{
+  \heading{\textit{#1}}{\textit{#2}}
+}
+
+\newenvironment{resume_list}{
+  \vspace{-7pt}
+  \begin{itemize}[itemsep=-2px, parsep=1pt, leftmargin=30pt]
+}{
+  \end{itemize}
+}
+
+\newcommand{\itemTitle}[1]{
+  \item[] \underline{#1}\vspace{4pt}
+}
+
+renewcommand\labelitemi{--}
+
+\begin{document}
+  % Heading
+  \documentTitle{Sudharsan S}{
+    \href{tel:1234567890}{
+      \raisebox{-0.05\height} \faPhone\ +91 9751120169} ~ | ~
+    \href{sudharsan97511@gmail.com}{
+      \raisebox{-0.15\height} \faEnvelope\ sudharsan97511@gmail.com} ~ | ~
+    \href{https://www.linkedin.com/in/sudharsan-s-528a8a2a0/}{
+      \raisebox{-0.15\height} \faLinkedin\ Linkedin} ~ | ~
+    \href{https://github.com/Sudharsanselvaraj}{
+      \raisebox{-0.15\height} \faGithub\ GitHub.com}
+  }
+
+  % Summary
+  \tinysection{Summary}
+  
+  \noindent
+  \begin{minipage}{\linewidth}
+  Research-oriented undergraduate in Computer Science Engineering with a focus on autonomous and resource-constrained systems. Experience in GNSS-denied navigation, RF signal processing, Doppler-based estimation, and system-level modeling under uncertainty.
+  \end{minipage}
+
+  % Skills
+  \section{Technical Skills}
+  \begin{multicols}{2}
+  \textbf{Programming:} Python, C++
+  \textbf{Systems \& Signal Processing:} RF signal processing, Doppler estimation, embedded Linux, hardware-software integration
+  \textbf{Machine Learning:} Deep learning, model training and evaluation
+  \columnbreak
+  \textbf{Scientific Tools:} NumPy, SciPy, OpenCV, Qiskit, PyTorch, TensorFlow
+  \textbf{Operating Systems:} Linux (Ubuntu)
+  \end{multicols}
+
+  % Experience
+  \section{Experience}
+  \headingBf{ALKF+, Central Hong Kong}{Feb 2026 -- Present}
+  \headingIt{Machine Learning Engineer (Part-Time)}{}
+  \begin{resume_list}
+    \item Developed a geospatial intelligence API using FastAPI, GeoPandas, and OSMnx to automate urban site analysis.
+  \end{resume_list}
+
+  \headingBf{National Institute of Technology, Trichy}{Jun 2025 -- Jul 2025}
+  \headingIt{Quantum Computation Researcher (Internship)}{}
+  \begin{resume_list}
+    \item Designed and implemented quantum algorithms including Caesar Cipher, Grover's Search, and Shor's Algorithm using Qiskit.
+  \end{resume_list}
+
+  \headingBf{Persist Ventures, San Francisco, USA}{Jan 2025 -- Mar 2025}
+  \headingIt{ML-Powered Robotics Developer (Internship)}{}
+  \begin{resume_list}
+    \item Investigated perception pipelines for autonomous navigation, implementing real-time object detection models (YOLOv5, TensorFlow).
+  \end{resume_list}
+
+  % Education
+  \section{Education}
+  \headingBf{SRM Institute of Science and Technology (Tiruchirappalli)}{} 
+  \headingIt{Bachelor of Technology in Computer Science Engineering}{}
+  \headingIt{Year: Aug 2023 - May 2027 \hfill \textbf{CGPA: 9.352}}{}
+
+  \headingIt{B.Tech Hons. Quantum Computation}{}
+  \headingIt{Year: Jul 2024 - May 2027 \hfill \textbf{Grade: O}}{}
+
+  % Honors
+  \section{Honors \& Awards}
+  \headingBf{Smart India Hackathon (SIH) 2025 - Winner}{National Level · Dec 2025}
+  \headingBf{Algovault Hackathon - Winner}{National Level · Nov 2025}
+  \headingBf{Protothon 1.0 - Winner}{National Level · Aug 2025}
+
+  % Projects
+  \section{Projects}
+  \headingBf{DhruvXPNT - Cognitive Opportunistic LEO-Based Navigation}
+  {\href{https://github.com/Sudharsanselvaraj/DhruvXPNT-Cognitive-Opportunistic-LEO-Based-Navigation-and-Timing-System.git}{\textcolor{blue}{\faGithub\ Github}}}
+  \begin{resume_list}
+    \item Designed and validated a GNSS-denied PNT system using LEO Signals of Opportunity.
+    \item Implemented an end-to-end RF-to-solution pipeline for signal acquisition and Doppler extraction.
+  \end{resume_list}
+
+  \headingBf{OrbitXOS - Orbital Dynamics-Based Space Debris Monitoring}
+  {\href{https://github.com/Sudharsanselvaraj/OrbitXOS.git}{\textcolor{blue}{\faGithub\ Github}}}
+  \begin{resume_list}
+    \item Developed a Space Situational Awareness platform using SGP4 and TLE data for real-time tracking.
+  \end{resume_list}
+
+  \headingBf{WQ Vision - Embedded AI and IoT Water Quality Monitoring}
+  {\href{https://github.com/Sudharsanselvaraj/wqvision-testing-kit.git}{\textcolor{blue}{\faGithub\ Github}}}
+  \begin{resume_list}
+    \item Designed and deployed a low-cost embedded AI system using ESP32-CAM for water contaminant detection.
+  \end{resume_list}
+
+\end{document}

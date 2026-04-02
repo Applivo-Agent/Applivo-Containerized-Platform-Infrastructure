@@ -1,0 +1,147 @@
+%-------------------------
+% Resume in Latex
+% Author: IIIT Vadodara Style
+% License : MIT
+%------------------------
+
+\documentclass[a4paper,11pt]{article}
+\usepackage{latexsym}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage[empty]{fullpage}
+\usepackage{wrapfig}
+\usepackage{lipsum}
+\usepackage{tabularx}
+\usepackage{titlesec}
+\usepackage{geometry}
+\usepackage{marvosym}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{graphicx}
+\usepackage{cfr-lm}
+\usepackage[T1]{fontenc}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\geometry{left=1.4cm, top=0.8cm, right=1.2cm, bottom=1cm}
+
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-7pt}]
+
+\newcommand{\resumeItem}[2]{
+  \item{
+    \textbf{#1}{\hspace{0.5mm}#2 \vspace{-0.5mm}}
+  }
+}
+
+\newcommand{\resumePOR}[3]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1}\hspace{0.3mm}#2 & \textit{\small{#3}} 
+    \end{tabular*}
+}
+
+\newcommand{\resumeSubheading}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\footnotesize{#4}} \\
+        \textit{\#3} &  \footnotesize{#2}\\
+    \end{tabular*}
+}
+
+\newcommand{\resumeProject}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\#3} \\
+        \textit{#2} & #4
+    \end{tabular*}
+}
+
+\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=*,labelsep=0mm]}
+\newcommand{\resumeHeadingSkillStart}{\begin{itemize}[leftmargin=*,itemsep=1.7mm, rightmargin=2ex]}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=3ex, rightmargin=2ex, noitemsep]\small}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}\vspace{2mm}}
+\newcommand{\resumeHeadingSkillEnd}{\end{itemize}\vspace{-2mm}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-2mm}}
+
+\begin{document}
+
+\begin{tabularx}{\linewidth}{L r}
+  \textbf{\Large YOUR NAME} & \faPhone\ +91-PhoneNumber\\
+  Roll No.: xxxxxxx & \faEnvelope\ email@example.com \\
+  Your Program &  \faGithub\ GitHub Profile \\
+  Your Course & \faLinkedin\ LinkedIn Profile \\
+  Institute Name & 
+\end{tabularx}
+
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Institute Name}{CGPA: X.XX}
+      {Your Degree}{Year}
+    \resumeSubheading
+      {School Name}{Percentage: XX\%}
+      {Board}{Year}
+    \resumeSubheading
+      {School Name}{CGPA/Percentage: X.X}
+      {Board}{Year}
+  \resumeSubHeadingListEnd
+
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Company Name}{City}
+      {Your Role}{Date}
+      \resumeItemListStart
+    \item Work description 1
+    \item Work description 2
+    \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+\section{Projects}
+\resumeSubHeadingListStart
+    \resumeProject
+      {Project Name}
+      {Project description}
+      {Date}
+      \resumeItemListStart
+        \item Tools: Tech1, Tech2
+        \item Description and achievements
+    \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.05in, label={}]
+    \small{\item{
+     \textbf{Languages}{: Python, C++} \\
+     \textbf{Developer Tools}{: Git, Docker} \\
+     \textbf{Frameworks}{: React, Django} \\
+     \textbf{Cloud/Databases}{: AWS, MySQL} \\
+     \textbf{Areas of Interest}{: ML, Web Dev} \\
+    }}
+ \end{itemize}
+
+\section{Positions of Responsibility}
+\resumeSubHeadingListStart
+\resumePOR{Position} % Position
+    {Organization} %Club,Event
+    {Tenure} %Tenure Period
+\resumeSubHeadingListEnd
+
+\section{Achievements}
+\resumeSubHeadingListStart
+\resumePOR{Achievement}
+    {Description}
+    {Year}
+\resumeSubHeadingListEnd
+
+\end{document}
