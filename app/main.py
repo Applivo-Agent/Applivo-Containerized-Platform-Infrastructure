@@ -132,6 +132,7 @@ def create_app() -> FastAPI:
     from app.api.routes.payments import router as payments_router
     from app.api.routes.platform import router as platform_router
     from app.api.routes.quotas import router as quotas_router
+    from app.api.routes.admin import admin_router
     from app.api.routes.routes import (
         applications_router,
         resumes_router,
@@ -163,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(payments_router, prefix=API_PREFIX)
     app.include_router(platform_router, prefix=API_PREFIX)
     app.include_router(quotas_router, prefix=API_PREFIX)
+    app.include_router(admin_router, prefix=API_PREFIX)
 
     # ── Health check ──────────────────────────────────────────
     @app.get("/health", tags=["System"])
