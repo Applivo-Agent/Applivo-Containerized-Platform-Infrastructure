@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 class SubscriptionService:
 
     async def get_active_subscription(
-        self, user_id: str, db: AsyncSession | None = None,
+        self, user_id: str, db:Optional[AsyncSession] = None,
     ) -> Optional[Subscription]:
         """Get the user's currently active subscription."""
         async def _query(session: AsyncSession) -> Optional[Subscription]:

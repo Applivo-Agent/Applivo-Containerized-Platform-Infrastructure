@@ -6,6 +6,7 @@ Handles cookie management for Internshala (and future platforms).
 """
 
 from __future__ import annotations
+from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/platform", tags=["Platform Connection"])
 
 class SaveCookiesRequest(BaseModel):
     platform: str
-    cookies: dict | list
+    cookies: Union[dict, list]
 
 
 class ValidateCookiesRequest(BaseModel):

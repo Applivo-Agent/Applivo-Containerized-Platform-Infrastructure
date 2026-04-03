@@ -7,7 +7,7 @@ Step-by-step profile collection and onboarding flow.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -27,19 +27,19 @@ router = APIRouter(prefix="/api/v1/onboarding", tags=["onboarding"])
 class BasicInfoUpdate(BaseModel):
     """Step 1: Basic personal information."""
     full_name: str = Field(..., min_length=1, max_length=255)
-    professional_summary: str | None = None
-    career_goals: str | None = None
-    unique_value_proposition: str | None = None
+    professional_summary:Optional[str] = None
+    career_goals:Optional[str] = None
+    unique_value_proposition:Optional[str] = None
 
 
 class ContactInfoUpdate(BaseModel):
     """Step 2: Contact information."""
-    phone: str | None = None
-    location: str | None = None
-    linkedin_url: str | None = None
-    github_url: str | None = None
-    portfolio_url: str | None = None
-    notification_email: str | None = None
+    phone:Optional[str] = None
+    location:Optional[str] = None
+    linkedin_url:Optional[str] = None
+    github_url:Optional[str] = None
+    portfolio_url:Optional[str] = None
+    notification_email:Optional[str] = None
 
 
 class EducationEntry(BaseModel):
@@ -47,9 +47,9 @@ class EducationEntry(BaseModel):
     degree: str = Field(..., description="Degree (e.g., B.Tech, M.S., PhD)")
     field: str = Field(..., description="Field of study (e.g., Computer Science)")
     institution: str = Field(..., description="University/College name")
-    year: int | None = Field(None, description="Graduation year")
-    gpa: float | None = Field(None, description="GPA (0-10 scale)")
-    description: str | None = None
+    year:Optional[int] = Field(None, description="Graduation year")
+    gpa:Optional[float] = Field(None, description="GPA (0-10 scale)")
+    description:Optional[str] = None
 
 
 class EducationUpdate(BaseModel):
@@ -62,9 +62,9 @@ class WorkExperienceEntry(BaseModel):
     title: str = Field(..., description="Job title")
     company: str = Field(..., description="Company name")
     start_date: str = Field(..., description="Start date (YYYY-MM)")
-    end_date: str | None = Field(None, description="End date (YYYY-MM)")
+    end_date:Optional[str] = Field(None, description="End date (YYYY-MM)")
     is_current: bool = Field(False, description="Currently working here")
-    description: str | None = None
+    description:Optional[str] = None
     bullets: List[str] = Field(default_factory=list, description="Key achievements")
 
 
@@ -76,9 +76,9 @@ class WorkExperienceUpdate(BaseModel):
 class SkillEntry(BaseModel):
     """Single skill entry."""
     name: str = Field(..., description="Skill name")
-    category: str | None = Field(None, description="Category: programming, ml_framework, cloud, tool, soft_skill")
-    proficiency: str | None = Field(None, description="beginner, intermediate, advanced, expert")
-    years_experience: float | None = None
+    category:Optional[str] = Field(None, description="Category: programming, ml_framework, cloud, tool, soft_skill")
+    proficiency:Optional[str] = Field(None, description="beginner, intermediate, advanced, expert")
+    years_experience:Optional[float] = None
     is_primary: bool = Field(False, description="Primary skill for job matching")
 
 
@@ -94,7 +94,7 @@ class ResumeSelect(BaseModel):
 
 class JobPreferencesUpdate(BaseModel):
     """Step 7: Job search preferences."""
-    experience_level: str | None = Field(None, description="entry, mid, senior")
+    experience_level:Optional[str] = Field(None, description="entry, mid, senior")
     desired_roles: List[str] = Field(default_factory=list, description="Target job titles")
     desired_locations: List[str] = Field(default_factory=list, description="Preferred cities/countries")
     open_to_remote: bool = True
@@ -107,16 +107,16 @@ class JobPreferencesUpdate(BaseModel):
 
 class PlatformSetupUpdate(BaseModel):
     """Step 8: Platform and notification settings."""
-    auto_apply_enabled: bool | None = None
-    auto_apply_threshold: int | None = Field(None, ge=0, le=100)
-    auto_apply_daily_limit: int | None = Field(None, ge=1, le=100)
-    require_apply_approval: bool | None = None
-    notify_new_jobs: bool | None = None
-    notify_applications: bool | None = None
-    notify_interviews: bool | None = None
-    notify_via_telegram: bool | None = None
-    notify_via_email: bool | None = None
-    telegram_chat_id: str | None = None
+    auto_apply_enabled:Optional[bool] = None
+    auto_apply_threshold:Optional[int] = Field(None, ge=0, le=100)
+    auto_apply_daily_limit:Optional[int] = Field(None, ge=1, le=100)
+    require_apply_approval:Optional[bool] = None
+    notify_new_jobs:Optional[bool] = None
+    notify_applications:Optional[bool] = None
+    notify_interviews:Optional[bool] = None
+    notify_via_telegram:Optional[bool] = None
+    notify_via_email:Optional[bool] = None
+    telegram_chat_id:Optional[str] = None
 
 
 # ── Dependencies ─────────────────────────────────────────────────
@@ -242,14 +242,14 @@ async def complete_onboarding(
 
 class CompleteProfileUpdate(BaseModel):
     """Complete profile update in one call."""
-    basic_info: BasicInfoUpdate | None = None
-    contact_info: ContactInfoUpdate | None = None
-    education: List[EducationEntry] | None = None
-    work_experience: List[WorkExperienceEntry] | None = None
-    skills: List[SkillEntry] | None = None
-    resume_id: str | None = None
-    job_preferences: JobPreferencesUpdate | None = None
-    platform_setup: PlatformSetupUpdate | None = None
+    basic_info:Optional[BasicInfoUpdate] = None
+    contact_info:Optional[ContactInfoUpdate] = None
+    education:Optional[List[EducationEntry]] = None
+    work_experience:Optional[List[WorkExperienceEntry]] = None
+    skills:Optional[List[SkillEntry]] = None
+    resume_id:Optional[str] = None
+    job_preferences:Optional[JobPreferencesUpdate] = None
+    platform_setup:Optional[PlatformSetupUpdate] = None
 
 
 @router.post("/complete-profile")

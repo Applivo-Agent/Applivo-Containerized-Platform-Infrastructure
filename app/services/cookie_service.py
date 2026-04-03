@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 import structlog
 from sqlalchemy import select
@@ -40,7 +40,7 @@ class CookieService:
         self,
         user_id: str,
         platform: str,
-        cookies: dict | list,
+        cookies: Union[dict, list],
     ) -> PlatformCookie:
         """
         Encrypt and save platform cookies for a user.
@@ -86,7 +86,7 @@ class CookieService:
 
     async def get_cookies(
         self, user_id: str, platform: str,
-    ) -> Optional[dict | list]:
+    ) -> Union[Optional[dict, list]]:
         """Decrypt and return platform cookies for a user."""
         async with get_db_context() as db:
             result = await db.execute(

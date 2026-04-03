@@ -827,7 +827,7 @@ _SUCCESS_SIGNALS = (
 )
 
 
-async def _check_submission_result(page) -> dict | None:
+async def _check_submission_result(page) ->Optional[dict]:
     """
     Return a success dict if submission succeeded, None if it clearly failed.
 

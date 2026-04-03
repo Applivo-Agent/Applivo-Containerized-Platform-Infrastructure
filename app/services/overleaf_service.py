@@ -69,7 +69,7 @@ class OverleafService:
 '''
 
     # User can provide custom template - this will be stored and used
-    _custom_template: str | None = None
+    _custom_template:Optional[str] = None
     _current_template_name: str = "default"
 
     def set_custom_template(self, latex_code: str) -> dict:

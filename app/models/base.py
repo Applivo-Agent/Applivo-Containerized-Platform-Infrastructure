@@ -2,6 +2,7 @@
 app/models/base.py
 """
 from __future__ import annotations
+from typing import Optional
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, String, func
@@ -28,7 +29,7 @@ class UUIDMixin:
 
 class SoftDeleteMixin:
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def soft_delete(self) -> None:
         self.is_deleted = True

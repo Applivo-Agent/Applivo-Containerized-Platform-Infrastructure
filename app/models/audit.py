@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 from sqlalchemy import (
     JSON,
@@ -234,7 +234,7 @@ class AuditLog(Base, UUIDMixin):
 
 # Helper function for creating audit log entries
 def create_audit_entry(
-    action: str | AuditAction,
+    action: Union[str, AuditAction],
     resource_type: str,
     resource_id: Optional[str] = None,
     user_id: Optional[str] = None,

@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
@@ -47,7 +47,7 @@ class EncryptionService:
         )
         return kdf.derive(master_key.encode("utf-8"))
     
-    def encrypt(self, data: str | dict | list) -> str:
+    def encrypt(self, data: Union[str, dict] | list) -> str:
         try:
             if not isinstance(data, str):
                 plaintext = json.dumps(data)
@@ -70,7 +70,7 @@ class EncryptionService:
         except Exception as e:
             raise EncryptionError(f"Decryption failed: {str(e)}")
     
-    def decrypt_json(self, encrypted: str) -> dict | list:
+    def decrypt_json(self, encrypted: str) -> Union[dict, list]:
         try:
             decrypted = self.decrypt(encrypted)
             return json.loads(decrypted)

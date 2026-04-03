@@ -11,10 +11,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import structlog
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,19 +26,20 @@ from app.schemas import UserCreate, UserOut, TokenResponse, LoginRequest
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 log = structlog.get_logger()
 
-# Password hashing - using bcrypt directly for better compatibility
-import bcrypt
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
 # JWT token scheme
 security = HTTPBearer(auto_error=False)
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    if not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_access_token(user_id: str, email: str) -> TokenResponse:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 app/services/application_service.py
 ─────────────────────────────────────
@@ -5,7 +7,7 @@ Handles batch application queuing logic.
 Respects daily limits, approval settings, match thresholds, and subscription quotas.
 """
 
-from __future__ import annotations
+from typing import Optional
 
 import structlog
 from sqlalchemy import select, func, desc
@@ -158,7 +160,7 @@ class ApplicationService:
 
         return {"user_id": user.id, "queued": queued, "daily_remaining": remaining - queued}
 
-    async def _find_best_resume(self, db, user_id: str, job: Job) -> Resume | None:
+    async def _find_best_resume(self, db, user_id: str, job: Job) ->Optional[Resume]:
         """Find the most appropriate resume for a job."""
         tailored = (await db.execute(
             select(Resume).where(
