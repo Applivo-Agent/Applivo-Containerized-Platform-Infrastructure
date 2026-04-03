@@ -26,19 +26,19 @@ from app.schemas import UserCreate, UserOut, TokenResponse, LoginRequest
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 log = structlog.get_logger()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing - using bcrypt directly for better compatibility
+import bcrypt
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # JWT token scheme
 security = HTTPBearer(auto_error=False)
 
-
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
 def create_access_token(user_id: str, email: str) -> TokenResponse:

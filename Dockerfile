@@ -1,8 +1,9 @@
 # ── Applivo SaaS Production Dockerfile ─────────────────────
 # Multi-stage build for smaller image size
+# Playwright Chromium installed at runtime if needed
 # ─────────────────────────────────────────────────────────────
 
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -13,19 +14,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip and install setuptools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Install Playwright browsers
-RUN playwright install chromium
 
 # ── Runtime Stage ──────────────────────────────────────────
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (includes Playwright Chromium deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libglib2.0-0 \
@@ -47,13 +48,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     libatspi2.0-0 \
     libwayland-client0 \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
-
-# Copy Playwright browsers
-COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 # Copy application code
 COPY . .

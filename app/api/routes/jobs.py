@@ -43,11 +43,13 @@ async def get_job_count(
     )
     new_today = result.scalar() or 0
     
-    # Jobs with match score >= 75
+    # Jobs with match score >= 75 (join with JobAnalysis)
     result = await db.execute(
-        select(func.count(Job.id)).where(
+        select(func.count(Job.id))
+        .join(JobAnalysis, Job.id == JobAnalysis.job_id)
+        .where(
             Job.is_active == True,
-            Job.match_score >= 75
+            JobAnalysis.match_score >= 75
         )
     )
     matching = result.scalar() or 0
@@ -275,11 +277,22 @@ async def skip_job(
 
 
 async def _trigger_job_analysis(job_id: str):
-    """Background task wrapper — dispatches to Celery."""
+    """Background task wrapper — runs analysis directly."""
     try:
-        from app.agents.tasks import analyze_job_task
-        analyze_job_task.delay(job_id)
+        from app.agents.tasks import analyze_new_jobs_batch_task
+        from app.core.database import get_db_context
+        from sqlalchemy import select
+        from app.models.job import Job
+
+        async with get_db_context() as db:
+            result = await db.execute(select(Job).where(Job.id == job_id))
+            job = result.scalar_one_or_none()
+            if job:
+                await analyze_new_jobs_batch_task()
+                import structlog
+                log = structlog.get_logger()
+                log.info("Job analysis completed", job_id=job_id)
     except Exception as e:
         import structlog
         log = structlog.get_logger()
-        log.error("Failed to queue job analysis", job_id=job_id, error=str(e))
+        log.error("Failed to analyze job", job_id=job_id, error=str(e))
