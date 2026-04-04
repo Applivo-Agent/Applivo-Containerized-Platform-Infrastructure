@@ -106,7 +106,7 @@ export const PLAN_FEATURES: Record<PlanTier, string[]> = {
 
 export const PLAN_PRICES: Record<PlanTier, number> = {
   none: 0,
-  starter: 0,
+  starter: 200,
   pro: 400,
   premium: 800,
 };
