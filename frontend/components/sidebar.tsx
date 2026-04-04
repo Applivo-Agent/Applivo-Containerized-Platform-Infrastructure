@@ -79,7 +79,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
         <Link href="/dashboard" className="flex items-center gap-2.5 group">
-          <img src="/logo.svg" alt="Applivo" className="w-8 h-8 group-hover:scale-105 transition-transform" />
+          <img src="/logo.JPG" alt="Applivo" className="w-8 h-8 rounded-lg group-hover:scale-105 transition-transform object-cover" />
           <span className="text-lg font-bold font-display gradient-text">Applivo</span>
         </Link>
       </div>

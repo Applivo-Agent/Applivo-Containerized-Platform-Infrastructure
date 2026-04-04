@@ -55,7 +55,7 @@ function RegisterPageContent() {
       >
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-6">
-            <img src="/logo.svg" alt="Applivo" className="w-10 h-10" />
+            <img src="/logo.JPG" alt="Applivo" className="w-10 h-10 rounded-xl" />
             <span className="text-2xl font-bold font-display gradient-text">Applivo</span>
           </Link>
           <h1 className="text-2xl font-bold">Create your account</h1>
