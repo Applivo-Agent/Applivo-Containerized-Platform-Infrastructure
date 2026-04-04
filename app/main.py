@@ -117,27 +117,38 @@ def create_app() -> FastAPI:
         from app.services.rate_limiter import rate_limiter
         from app.api.routes.auth import get_current_user
 
-        # Skip rate limiting for health check and static assets
         skip_paths = ["/health", "/dashboard", "/", "/api/docs", "/api/redoc", "/api/openapi.json"]
         if request.url.path in skip_paths:
             return await call_next(request)
 
-        # Rate limit by IP for unauthenticated, by user_id for authenticated
         client_ip = request.client.host if request.client else "unknown"
-        key = f"rate:{client_ip}"
-
-        result = await rate_limiter.is_allowed(
-            key=key,
-            max_requests=settings.RATE_LIMIT_REQUESTS,
-            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
-        )
-
-        if not result["allowed"]:
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"detail": "Rate limit exceeded", "retry_after": result["retry_after"]},
-                headers={"Retry-After": str(result["retry_after"])},
+        
+        if request.url.path in ["/api/v1/auth/login", "/api/v1/auth/register"]:
+            auth_key = f"auth_rate:{client_ip}"
+            result = await rate_limiter.is_allowed(
+                key=auth_key,
+                max_requests=5,
+                window_seconds=300,
             )
+            if not result["allowed"]:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "Too many authentication attempts. Please try again in 5 minutes.", "retry_after": result["retry_after"]},
+                    headers={"Retry-After": str(result["retry_after"])},
+                )
+        else:
+            key = f"rate:{client_ip}"
+            result = await rate_limiter.is_allowed(
+                key=key,
+                max_requests=settings.RATE_LIMIT_REQUESTS,
+                window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+            )
+            if not result["allowed"]:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "Rate limit exceeded", "retry_after": result["retry_after"]},
+                    headers={"Retry-After": str(result["retry_after"])},
+                )
 
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(result["remaining"])

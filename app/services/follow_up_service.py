@@ -65,6 +65,17 @@ class FollowUpService:
                     app.last_follow_up_at = now
                     app.follow_up_count += 1
                     sent += 1
+
+                    try:
+                        from app.services.notification_service import NotificationService
+                        await NotificationService().notify(
+                            title="📧 Follow-up Email Sent",
+                            body=f"We just sent a follow-up to {app.company_snapshot} regarding your {app.job_title_snapshot} application.\n\nStaying proactive shows you're genuinely interested! We'll let you know if they respond.",
+                            event_type="follow_up_sent",
+                            user_id=app.user_id,
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error("Follow-up failed", app_id=app.id, error=str(e))
 
@@ -85,6 +96,16 @@ class FollowUpService:
                 try:
                     await self._send_thank_you_email(app, db)
                     sent += 1
+                    try:
+                        from app.services.notification_service import NotificationService
+                        await NotificationService().notify(
+                            title="🙏 Thank You Email Sent",
+                            body=f"We sent a thank-you note to {app.company_snapshot} after your interview!\n\nThis small gesture can leave a lasting impression. Fingers crossed for a positive response!",
+                            event_type="thank_you_sent",
+                            user_id=app.user_id,
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error("Thank-you email failed", app_id=app.id, error=str(e))
 

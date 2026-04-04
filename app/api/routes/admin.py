@@ -13,11 +13,13 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, EmailStr
 
-from app.core.database import get_db
+from app.core.database import get_db, get_db_context
 from app.api.routes.auth import get_current_user
 from app.models.user import User, UserProfile
 from app.models.subscription import Subscription, SubscriptionStatus, PlanTier, Payment, PaymentStatus
 from app.models.audit import AuditLog, AuditAction, create_audit_entry
+from app.models.application import Application, ApplicationStatus
+from app.models.job import Job
 
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -592,7 +594,7 @@ async def system_health(
         health["status"] = "degraded"
 
     try:
-        from app.core.celery_app import celery_app
+        from app.celery_app import celery_app
         inspect = celery_app.control.inspect()
         stats = inspect.stats()
         if stats:
@@ -705,32 +707,145 @@ async def get_platform_settings(
 async def get_queue_status(
     admin: User = Depends(require_admin),
 ):
-    """Get Celery queue status."""
-    from app.core.celery_app import celery_app
+    """Get queue status with APScheduler."""
+    from app.services.scheduler_service import SchedulerService
+    from sqlalchemy import select, func
+    from app.models.application import Application, ApplicationStatus
+    from app.models.job import Job
+    
+    scheduler = SchedulerService()
+    jobs = scheduler.list_jobs()
+    
+    queue_data = {
+        "pending": 0,
+        "applying": 0,
+        "failed": 0,
+        "total_jobs": 0,
+        "scheduled_tasks": [],
+        "scheduler_running": scheduler.running if hasattr(scheduler, 'running') else False,
+        "celery_workers": [],
+        "celery_queues": {},
+    }
     
     try:
+        from app.celery_app import celery_app
         inspect = celery_app.control.inspect()
-        stats = inspect.stats()
-        active = inspect.active()
-        reserved = inspect.reserved()
         
-        queues = {
-            "default": len(reserved.get("celery@*", [])) if reserved else 0,
-            "scraping": 0,
-            "analysis": 0,
-            "apply": 0,
-        }
+        stats = inspect.stats()
+        if stats:
+            queue_data["celery_workers"] = [
+                {"name": name, "status": "active", "active_tasks": info.get("pool", {}).get("max", 0)}
+                for name, info in stats.items()
+            ]
+        
+        active = inspect.active()
+        if active:
+            for queue_name, tasks in active.items():
+                queue_data["celery_queues"][queue_name] = len(tasks)
+        
+        reserved = inspect.reserved()
+        if reserved:
+            for queue_name, tasks in reserved.items():
+                if queue_name in queue_data["celery_queues"]:
+                    queue_data["celery_queues"][queue_name] += len(tasks)
+                else:
+                    queue_data["celery_queues"][queue_name] = len(tasks)
+    except Exception as e:
+        queue_data["celery_error"] = str(e)
+    
+    async with get_db_context() as db:
+        pending_apps = (await db.execute(
+            select(func.count(Application.id)).where(
+                Application.status == ApplicationStatus.QUEUED
+            )
+        )).scalar() or 0
+        
+        applying_apps = (await db.execute(
+            select(func.count(Application.id)).where(
+                Application.status == ApplicationStatus.APPLYING
+            )
+        )).scalar() or 0
+        
+        failed_apps = (await db.execute(
+            select(func.count(Application.id)).where(
+                Application.status == ApplicationStatus.FAILED
+            )
+        )).scalar() or 0
+        
+        total_jobs = (await db.execute(
+            select(func.count(Job.id))
+        )).scalar() or 0
+    
+    scheduled_tasks = [
+        {"id": j.id, "name": j.name, "next_run": str(j.next_run_time) if j.next_run_time else None}
+        for j in jobs
+    ]
+    
+    return {
+        **queue_data,
+        "pending": pending_apps,
+        "applying": applying_apps,
+        "failed": failed_apps,
+        "total_jobs": total_jobs,
+        "scheduled_tasks": scheduled_tasks,
+    }
+
+
+@admin_router.get("/queue/failed")
+async def get_failed_jobs(
+    admin: User = Depends(require_admin),
+    limit: int = 50,
+):
+    """Get failed applications with error details."""
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(Application)
+            .where(Application.status == ApplicationStatus.FAILED)
+            .order_by(Application.updated_at.desc())
+            .limit(limit)
+        )
+        failed = result.scalars().all()
         
         return {
-            "default": 0,
-            "scraping": 0,
-            "analysis": 0,
-            "apply": 0,
-            "workers": list(stats.keys()) if stats else [],
-            "active_tasks": sum(len(v) for v in active.values()) if active else 0,
+            "failed_jobs": [
+                {
+                    "id": app.id,
+                    "user_id": app.user_id,
+                    "job_title": app.job_title_snapshot,
+                    "company": app.company_snapshot,
+                    "error": app.bot_error,
+                    "retry_count": app.retry_count,
+                    "updated_at": app.updated_at.isoformat() if app.updated_at else None,
+                }
+                for app in failed
+            ]
         }
-    except Exception as e:
-        return {"error": str(e)}
+
+
+@admin_router.post("/queue/retry/{application_id}")
+async def retry_application(
+    application_id: str,
+    admin: User = Depends(require_admin),
+):
+    """Retry a failed application."""
+    async with get_db_context() as db:
+        result = await db.execute(
+            select(Application).where(Application.id == application_id)
+        )
+        app = result.scalar_one_or_none()
+        
+        if not app:
+            raise HTTPException(status_code=404, detail="Application not found")
+        
+        if app.status != ApplicationStatus.FAILED:
+            raise HTTPException(status_code=400, detail="Only failed applications can be retried")
+        
+        app.status = ApplicationStatus.QUEUED
+        app.bot_error = None
+        app.retry_count = (app.retry_count or 0) + 1
+        await db.commit()
+        
+        return {"success": True, "message": f"Application {application_id} queued for retry"}
 
 
 @admin_router.post("/system/{action}")
@@ -743,8 +858,8 @@ async def system_action(
     log = structlog.get_logger()
     
     if action == "run-scraper":
-        from app.agents.scrapers.internshala import InternshalaScraper
-        scraper = InternshalaScraper()
+        from app.agents.scrapers.internshala import InternshalaScaper
+        scraper = InternshalaScaper()
         try:
             jobs = await scraper.run()
             return {"success": True, "message": f"Scraped {jobs} jobs"}
@@ -753,7 +868,7 @@ async def system_action(
     
     elif action == "clear-queue":
         try:
-            from app.core.celery_app import celery_app
+            from app.celery_app import celery_app
             celery_app.control.purge()
             return {"success": True, "message": "Queue cleared"}
         except Exception as e:
@@ -761,10 +876,147 @@ async def system_action(
     
     elif action == "restart-worker":
         try:
-            from app.core.celery_app import celery_app
+            from app.celery_app import celery_app
             celery_app.control.broadcast("shutdown", destination=["celery@*"])
             return {"success": True, "message": "Worker restart signal sent"}
         except Exception as e:
             return {"success": False, "error": str(e)}
     
     return {"success": False, "error": "Unknown action"}
+
+
+@admin_router.get("/applications")
+async def list_applications(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """List all applications."""
+    query = (
+        select(Application)
+        .options(selectinload(Application.user))
+        .order_by(desc(Application.created_at))
+    )
+    
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    applications = result.scalars().all()
+    
+    items = [
+        {
+            "id": str(a.id),
+            "user_email": a.user.email if a.user else "Unknown",
+            "job_title": a.job_title_snapshot or "Unknown",
+            "company": a.company_snapshot or "Unknown",
+            "status": a.status.value if hasattr(a.status, 'value') else str(a.status),
+            "error": a.bot_error,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in applications
+    ]
+    
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@admin_router.get("/jobs")
+async def list_jobs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """List all jobs."""
+    query = select(Job).order_by(desc(Job.scraped_at))
+    
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    jobs = result.scalars().all()
+    
+    items = [
+        {
+            "id": str(j.id),
+            "title": j.title,
+            "company": j.company_name,
+            "source": j.source.value if j.source else "internshala",
+            "status": "active" if j.is_active else "inactive",
+            "scraped_at": j.scraped_at.isoformat() if j.scraped_at else None,
+        }
+        for j in jobs
+    ]
+    
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@admin_router.get("/analytics")
+async def get_analytics(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Get analytics data for charts."""
+    from datetime import timedelta
+    from sqlalchemy import func
+    
+    today = datetime.now(timezone.utc).date()
+    seven_days_ago = today - timedelta(days=6)
+    
+    app_query = (
+        select(
+            func.date(Application.created_at).label("date"),
+            func.count().label("count")
+        )
+        .where(func.date(Application.created_at) >= seven_days_ago)
+        .group_by(func.date(Application.created_at))
+        .order_by(func.date(Application.created_at))
+    )
+    app_result = await db.execute(app_query)
+    applications_by_day = [{"date": str(r.date), "count": r.count} for r in app_result.all()]
+    
+    pay_query = (
+        select(
+            func.date(Payment.created_at).label("date"),
+            func.sum(Payment.amount).label("amount")
+        )
+        .where(Payment.status == PaymentStatus.CAPTURED)
+        .where(func.date(Payment.created_at) >= seven_days_ago)
+        .group_by(func.date(Payment.created_at))
+        .order_by(func.date(Payment.created_at))
+    )
+    pay_result = await db.execute(pay_query)
+    revenue_by_day = [{"date": str(r.date), "amount": float(r.amount or 0)} for r in pay_result.all()]
+    
+    user_query = (
+        select(
+            func.date(User.created_at).label("date"),
+            func.count().label("count")
+        )
+        .where(func.date(User.created_at) >= seven_days_ago)
+        .group_by(func.date(User.created_at))
+        .order_by(func.date(User.created_at))
+    )
+    user_result = await db.execute(user_query)
+    users_by_day = [{"date": str(r.date), "count": r.count} for r in user_result.all()]
+    
+    return {
+        "applications_by_day": applications_by_day,
+        "revenue_by_day": revenue_by_day,
+        "users_by_day": users_by_day,
+    }
+
+
+@admin_router.get("/features")
+async def get_feature_flags(
+    admin: User = Depends(require_admin),
+):
+    """Get feature flags."""
+    return [
+        {"key": "auto_apply", "label": "Auto Apply", "description": "Automatically apply to matching jobs", "enabled": True},
+        {"key": "ai_chat", "label": "AI Chat", "description": "AI-powered chat support", "enabled": True},
+        {"key": "payments", "label": "Payments", "description": "Enable payment system", "enabled": True},
+        {"key": "scraper", "label": "Scraper", "description": "Enable job scraping", "enabled": True},
+        {"key": "maintenance", "label": "Maintenance Mode", "description": "Show maintenance page to users", "enabled": False},
+    ]

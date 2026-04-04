@@ -52,9 +52,9 @@ export const profileApi = {
 
 // ─── Onboarding ───────────────────────────────────────────────────────────
 export const onboardingApi = {
-  status: () => api.get("/onboarding/status"),
+  status: () => api.get("/v1/onboarding/status"),
   complete: (step: string, data: Record<string, unknown>) =>
-    api.post(`/onboarding/${step}`, data),
+    api.post(`/v1/onboarding/${step}`, data),
 };
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────
@@ -101,6 +101,8 @@ export const coverLettersApi = {
   list: () => api.get("/cover-letters"),
   generate: (data: { job_id: string; tone?: string; additional_context?: string }) =>
     api.post("/cover-letters/generate", data),
+  get: (id: string) => api.get(`/cover-letters/${id}`),
+  delete: (id: string) => api.delete(`/cover-letters/${id}`),
 };
 
 // ─── Agent ────────────────────────────────────────────────────────────────

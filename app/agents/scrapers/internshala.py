@@ -68,11 +68,13 @@ class InternshalaScaper(BaseScraper):
 
     BASE_URL = "https://internshala.com"
 
-    def __init__(self):
+    def __init__(self, user_id: str = None):
 
         super().__init__()
 
         self._ua = random.choice(_USER_AGENTS)
+        self._user_id = user_id
+        self._user_desired_roles = None
 
         self._cookies_file = (
             settings.storage_path /
@@ -81,17 +83,40 @@ class InternshalaScaper(BaseScraper):
 
         self._client: Optional[httpx.AsyncClient] = None
 
+    async def _load_user_preferences(self):
+        """Load user's desired roles from database if user_id provided."""
+        if not self._user_id or self._user_desired_roles is not None:
+            return
+        
+        try:
+            from sqlalchemy import select
+            from app.models.user import UserProfile
+            from app.core.database import get_db_context
+            
+            async with get_db_context() as db:
+                result = await db.execute(
+                    select(UserProfile.desired_roles).where(UserProfile.user_id == self._user_id)
+                )
+                self._user_desired_roles = result.scalar_one_or_none() or []
+        except Exception:
+            self._user_desired_roles = []
+
     # REQUIRED METHOD
 
     async def _get_search_queries(
         self
     ) -> List[Dict[str, Any]]:
 
+        await self._load_user_preferences()
+        
         queries: List[Dict[str, Any]] = []
 
         seen: set = set()
 
-        for role in settings.USER_DESIRED_ROLES:
+        # Use user's desired roles from database, fallback to settings
+        roles_to_use = self._user_desired_roles if self._user_desired_roles else settings.USER_DESIRED_ROLES
+
+        for role in roles_to_use:
 
             role = role.strip()
 

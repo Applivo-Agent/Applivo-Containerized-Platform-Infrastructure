@@ -60,19 +60,37 @@ export default function DashboardPage() {
   const runAgent = useMutation({
     mutationFn: () => agentApi.run({ task_type: "scrape_jobs" }),
     onSuccess: () => toast.success("Scrape started! Check back in a few minutes."),
-    onError: () => toast.error("Failed to start agent"),
+    onError: (err: any) => {
+      if (err.response?.status === 403) {
+        toast.error("Subscription required! Please subscribe at /subscription to use agent features.");
+      } else {
+        toast.error("Failed to start agent");
+      }
+    },
   });
 
   const runAnalyzeQueue = useMutation({
     mutationFn: () => agentApi.run({ task_type: "analyze_and_queue" }),
     onSuccess: (res: any) => toast.success(`Analyzed ${res.data.analyzed} jobs, queued ${res.data.queued} for applying`),
-    onError: () => toast.error("Failed to analyze and queue"),
+    onError: (err: any) => {
+      if (err.response?.status === 403) {
+        toast.error("Subscription required! Please subscribe at /subscription to use agent features.");
+      } else {
+        toast.error("Failed to analyze and queue");
+      }
+    },
   });
 
   const runApply = useMutation({
     mutationFn: () => agentApi.run({ task_type: "apply_queued" }),
     onSuccess: (res: any) => toast.success(`Applied to ${res.data.applied} jobs!`),
-    onError: () => toast.error("Failed to apply"),
+    onError: (err: any) => {
+      if (err.response?.status === 403) {
+        toast.error("Subscription required! Please subscribe at /subscription to use agent features.");
+      } else {
+        toast.error("Failed to apply");
+      }
+    },
   });
 
   const stats = dashboard ? [

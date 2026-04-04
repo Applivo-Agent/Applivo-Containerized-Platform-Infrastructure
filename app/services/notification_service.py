@@ -64,8 +64,14 @@ class NotificationService:
 
             # FIX 6: Use per-user telegram_chat_id; fall back to global setting
             per_user_chat_id = profile.telegram_chat_id or settings.TELEGRAM_CHAT_ID
+            
+            # Skip Telegram if it's a bot chat_id (bots can't message bots, identified by -100 prefix)
+            if per_user_chat_id and str(per_user_chat_id).startswith("-100"):
+                logger.info("Skipping Telegram - bot chat_id detected", chat_id=per_user_chat_id)
+                per_user_chat_id = None
+            
             notify_telegram = bool(settings.TELEGRAM_BOT_TOKEN and per_user_chat_id and profile.notify_via_telegram)
-            notify_email = bool(profile.notify_via_email and settings.SMTP_USERNAME)
+            notify_email = bool(settings.SMTP_USERNAME and profile.notify_via_email)
 
             if notify_telegram:
                 tg_notif = Notification(
@@ -83,7 +89,20 @@ class NotificationService:
                 await self._send_telegram(tg_notif, db, chat_id=per_user_chat_id)
 
             if notify_email:
-                to_email = profile.notification_email or settings.USER_EMAIL or settings.SMTP_USERNAME
+                # Get user's actual email from User table
+                from app.models.user import User
+                user_result = await db.execute(
+                    select(User.email).where(User.id == resolved_user_id)
+                )
+                user_email = user_result.scalar_one_or_none()
+                
+                # Fallback chain: notification_email -> user.email -> SMTP_USERNAME
+                to_email = profile.notification_email or user_email or settings.SMTP_USERNAME
+                
+                if not to_email:
+                    logger.warning("No email address found for notification", user_id=resolved_user_id)
+                    return
+                    
                 email_notif = Notification(
                     user_id=resolved_user_id,
                     channel="email",
@@ -336,12 +355,17 @@ class NotificationService:
             for j in top_jobs
         ) or "No new jobs today."
 
-        body = (
-            f"Daily Career Summary\n\n"
-            f"Jobs Found Today: {jobs_today}\n"
-            f"Applications Sent: {apps_today}\n\n"
-            f"Top Matches:\n{job_lines}"
-        )
+        body = f"""📊 Your Daily Career Update
+
+Jobs Found Today: {jobs_today}
+Applications Sent: {apps_today}
+
+🔥 Top Matches:
+{job_lines}
+
+Keep up the great work! Your next opportunity is just around the corner.
+
+— Applivo AI"""
 
         await self.notify(
             title="Daily Career Update",

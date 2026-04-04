@@ -186,4 +186,70 @@ TASK_REGISTRY = {
     "analyze_new_jobs": analyze_new_jobs_batch_task,
     "check_follow_ups": check_follow_ups,
     "daily_digest": send_daily_digest_task,
+    "check_expiring_subscriptions": check_expiring_subscriptions,
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  COVER LETTERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def generate_cover_letter_task(user_id: str, job_id: str, tone: str = "professional"):
+    """Generate a cover letter for a specific job."""
+    try:
+        from app.services.cover_letter_service import CoverLetterService
+        result = await CoverLetterService().generate(user_id, job_id, tone)
+        logger.info(f"Cover letter generated: {result.get('cover_letter_id')}")
+        return result
+    except Exception as exc:
+        logger.error(f"Cover letter generation failed: {exc}")
+        return {"error": str(exc)}
+
+
+async def check_expiring_subscriptions():
+    """Check for subscriptions expiring in 3 days and send notifications."""
+    from datetime import timedelta
+    from sqlalchemy import select
+    from app.models.subscription import Subscription
+    from app.core.database import get_db_context
+
+    async with get_db_context() as db:
+        from datetime import datetime, timezone
+        three_days = datetime.now(timezone.utc) + timedelta(days=3)
+        
+        result = await db.execute(
+            select(Subscription).where(
+                Subscription.end_date <= three_days,
+                Subscription.end_date >= datetime.now(timezone.utc),
+                Subscription.is_active == True,
+            )
+        )
+        expiring = result.scalars().all()
+        
+        for sub in expiring:
+            try:
+                from app.services.notification_service import NotificationService
+                days_left = (sub.end_date - datetime.now(timezone.utc)).days
+                plan_name = sub.plan.value if hasattr(sub.plan, 'value') else str(sub.plan)
+                await NotificationService().notify(
+                    title="⏰ Subscription Expiring Soon",
+                    body=f"""Your {plan_name.upper()} subscription expires in {days_left} day(s) ({sub.end_date.strftime('%B %d, %Y')}).
+
+Don't lose access to:
+• Unlimited job applications
+• AI-powered resume tailoring
+• Auto-apply features
+• Interview prep materials
+
+Renew now to continue your job search without interruption!
+
+Visit your dashboard to renew → /subscription
+
+— Team Applivo""",
+                    event_type="subscription_expiring",
+                    user_id=sub.user_id,
+                )
+            except Exception as e:
+                logger.error(f"Expiry notification failed: {e}")
+        
+        return {"checked": len(expiring)}

@@ -198,7 +198,6 @@ class OnboardingService:
             profile.unique_value_proposition = data["unique_value_proposition"]
         
         await self.db.commit()
-        await self.db.refresh(self.user)
         
         logger.info("Basic info updated", user_id=self.user.id)
         
@@ -296,9 +295,11 @@ class OnboardingService:
 
     async def update_skills(self, skills: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Update user skills."""
-        # Remove existing skills
+        from sqlalchemy import delete
+        
+        # Use proper delete statement with await
         await self.db.execute(
-            UserSkill.__table__.delete().where(UserSkill.user_id == self.user.id)
+            delete(UserSkill).where(UserSkill.user_id == self.user.id)
         )
         
         # Add new skills
@@ -316,7 +317,7 @@ class OnboardingService:
                 is_primary=skill.get("is_primary", False),
             )
             self.db.add(user_skill)
-            added_skills.append(user_skill.get("name"))
+            added_skills.append(skill.get("name"))
         
         await self.db.commit()
         

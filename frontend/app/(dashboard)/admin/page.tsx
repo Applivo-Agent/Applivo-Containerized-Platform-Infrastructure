@@ -4,14 +4,15 @@ import {
   Users, Activity, Shield, BarChart3, Globe, Zap,
   AlertCircle, CheckCircle2, Settings, Database, DollarSign, 
   Briefcase, TrendingUp, Server, Pause, Play, RotateCcw,
-  Trash2, Search, Filter, MoreHorizontal, X, Check
+  Trash2, Search, Filter, MoreHorizontal, X, Check,
+  ToggleLeft, FileText, History, Cpu
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 
-type Tab = "dashboard" | "users" | "subscriptions" | "payments" | "bot" | "queue" | "errors" | "settings";
+type Tab = "dashboard" | "users" | "subscriptions" | "payments" | "applications" | "jobs" | "bot" | "queue" | "errors" | "analytics" | "features" | "audit" | "settings";
 
 interface User {
   id: string;
@@ -53,10 +54,14 @@ interface BotStats {
 }
 
 interface QueueStats {
-  default: number;
-  scraping: number;
-  analysis: number;
-  apply: number;
+  pending: number;
+  applying: number;
+  failed: number;
+  total_jobs: number;
+  scheduled_tasks: { id: string; name: string; next_run: string | null }[];
+  scheduler_running: boolean;
+  celery_workers: { name: string; status: string; active_tasks: number }[];
+  celery_queues: Record<string, number>;
 }
 
 interface SystemHealth {
@@ -80,14 +85,61 @@ interface Stats {
   jobs_scraped: number;
 }
 
+interface Application {
+  id: string;
+  user_email: string;
+  job_title: string;
+  company: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+interface Job {
+  id: string;
+  title: string;
+  company: string;
+  source: string;
+  status: string;
+  scraped_at: string;
+}
+
+interface FeatureFlag {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+interface AuditLog {
+  id: string;
+  admin_email: string;
+  action: string;
+  target: string;
+  ip_address: string;
+  result: string;
+  created_at: string;
+}
+
+interface AnalyticsData {
+  applications_by_day: { date: string; count: number }[];
+  revenue_by_day: { date: string; amount: number }[];
+  users_by_day: { date: string; count: number }[];
+}
+
 const TABS = [
   { id: "dashboard" as Tab, label: "Dashboard", icon: BarChart3 },
   { id: "users" as Tab, label: "Users", icon: Users },
   { id: "subscriptions" as Tab, label: "Subscriptions", icon: Zap },
   { id: "payments" as Tab, label: "Payments", icon: DollarSign },
+  { id: "applications" as Tab, label: "Applications", icon: FileText },
+  { id: "jobs" as Tab, label: "Jobs", icon: Briefcase },
   { id: "bot" as Tab, label: "Bot Monitor", icon: Globe },
   { id: "queue" as Tab, label: "Queue", icon: Server },
   { id: "errors" as Tab, label: "Errors", icon: AlertCircle },
+  { id: "analytics" as Tab, label: "Analytics", icon: TrendingUp },
+  { id: "features" as Tab, label: "Feature Flags", icon: ToggleLeft },
+  { id: "audit" as Tab, label: "Audit Logs", icon: History },
   { id: "settings" as Tab, label: "Settings", icon: Settings },
 ];
 
@@ -101,9 +153,14 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [botStats, setBotStats] = useState<BotStats | null>(null);
   const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   
   // Search/filter states
   const [userSearch, setUserSearch] = useState("");
@@ -135,6 +192,14 @@ export default function AdminDashboard() {
           const payRes = await api.get("/admin/payments?page_size=50");
           setPayments(payRes.data.items || []);
           break;
+        case "applications":
+          const appRes = await api.get("/admin/applications?page_size=50");
+          setApplications(appRes.data.items || []);
+          break;
+        case "jobs":
+          const jobsRes = await api.get("/admin/jobs?page_size=50");
+          setJobs(jobsRes.data.items || []);
+          break;
         case "bot":
           const botRes = await api.get("/agent/status");
           setBotStats(botRes.data);
@@ -142,6 +207,18 @@ export default function AdminDashboard() {
         case "queue":
           const queueRes = await api.get("/admin/queue/status");
           setQueueStats(queueRes.data);
+          break;
+        case "analytics":
+          const analyticsRes = await api.get("/admin/analytics");
+          setAnalyticsData(analyticsRes.data);
+          break;
+        case "features":
+          const featuresRes = await api.get("/admin/features");
+          setFeatureFlags(featuresRes.data || []);
+          break;
+        case "audit":
+          const auditRes = await api.get("/admin/audit-logs?page_size=50");
+          setAuditLogs(auditRes.data.items || []);
           break;
         case "settings":
           const healthRes = await api.get("/admin/system/health");
@@ -250,9 +327,14 @@ export default function AdminDashboard() {
           {activeTab === "users" && <UsersTab users={filteredUsers} search={userSearch} setSearch={setUserSearch} actionLoading={actionLoading} onAction={handleUserAction} />}
           {activeTab === "subscriptions" && <SubscriptionsTab subscriptions={subscriptions} />}
           {activeTab === "payments" && <PaymentsTab payments={payments} />}
+          {activeTab === "applications" && <ApplicationsTab applications={applications} />}
+          {activeTab === "jobs" && <JobsTab jobs={jobs} />}
           {activeTab === "bot" && <BotTab stats={botStats} />}
           {activeTab === "queue" && <QueueTab stats={queueStats} />}
           {activeTab === "errors" && <ErrorsTab />}
+          {activeTab === "analytics" && <AnalyticsTab data={analyticsData} />}
+          {activeTab === "features" && <FeaturesTab flags={featureFlags} />}
+          {activeTab === "audit" && <AuditTab logs={auditLogs} />}
           {activeTab === "settings" && <SettingsTab health={systemHealth} onAction={runSystemAction} loading={loading} />}
         </>
       )}
@@ -441,7 +523,8 @@ function PaymentsTab({ payments }: { payments: Payment[] }) {
 }
 
 function BotTab({ stats }: { stats: BotStats | null }) {
-  const isRunning = !!(stats?.status === "running" || stats?.status === true || stats?.status === "true");
+  const statusStr = String(stats?.status || "").toLowerCase();
+  const isRunning = ["running", "true", "active"].includes(statusStr) || Boolean(stats?.status);
   
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -477,22 +560,105 @@ function BotTab({ stats }: { stats: BotStats | null }) {
 }
 
 function QueueTab({ stats }: { stats: QueueStats | null }) {
-  const queues = stats ? [
-    { name: "Default", count: stats.default, color: "bg-blue-500" },
-    { name: "Scraping", count: stats.scraping, color: "bg-amber-500" },
-    { name: "Analysis", count: stats.analysis, color: "bg-brand-purple" },
-    { name: "Apply", count: stats.apply, color: "bg-emerald-500" },
+  const queueItems = stats ? [
+    { name: "Pending Applications", count: stats.pending, color: "bg-amber-500", icon: AlertCircle },
+    { name: "Applying", count: stats.applying, color: "bg-blue-500", icon: Activity },
+    { name: "Failed", count: stats.failed, color: "bg-red-500", icon: X },
+    { name: "Total Jobs Scraped", count: stats.total_jobs, color: "bg-emerald-500", icon: Briefcase },
   ] : [];
 
+  const workerItems = stats?.celery_workers || [];
+  const queueNames = stats?.celery_queues ? Object.entries(stats.celery_queues) : [];
+  
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {queues.map(q => (
-        <div key={q.name} className="glass-card p-6">
-          <div className="text-sm text-muted-foreground mb-2">{q.name}</div>
-          <div className="text-3xl font-bold">{q.count}</div>
-          <div className={`h-1 mt-3 rounded-full ${q.color}`} style={{ width: `${Math.min((q.count / 100) * 100, 100)}%` }}></div>
+    <div className="space-y-6">
+      {/* Application Queue Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {queueItems.map(q => (
+          <div key={q.name} className="glass-card p-6">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+              <q.icon className="w-4 h-4" />
+              {q.name}
+            </div>
+            <div className="text-3xl font-bold">{q.count}</div>
+            <div className={`h-1 mt-3 rounded-full ${q.color}`} style={{ width: `${Math.min((q.count / 100) * 100, 100)}%` }}></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Celery Workers */}
+      <div className="glass-card p-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Server className="w-5 h-5" />
+          Celery Workers
+        </h3>
+        {workerItems.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {workerItems.map((w, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+                <div className={`w-3 h-3 rounded-full ${w.status === 'active' ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`}></div>
+                <div>
+                  <div className="text-sm font-medium">{w.name}</div>
+                  <div className="text-xs text-muted-foreground">Active tasks: {w.active_tasks}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-center py-4">No workers connected</p>
+        )}
+      </div>
+
+      {/* Queue Distribution */}
+      {queueNames.length > 0 && (
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Cpu className="w-5 h-5" />
+            Active Tasks by Queue
+          </h3>
+          <div className="space-y-3">
+            {queueNames.map(([name, count]) => (
+              <div key={name} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <span className="font-medium">{name}</span>
+                <span className="text-brand-purple-light">{count} tasks</span>
+              </div>
+            ))}
+          </div>
         </div>
-      ))}
+      )}
+
+      {/* Scheduled Tasks */}
+      {stats?.scheduled_tasks && stats.scheduled_tasks.length > 0 && (
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <RotateCcw className="w-5 h-5" />
+            Scheduled Tasks
+          </h3>
+          <div className="space-y-2">
+            {stats.scheduled_tasks.map((task, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <span className="font-medium">{task.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {task.next_run ? `Next: ${new Date(task.next_run).toLocaleString()}` : 'Not scheduled'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Scheduler Status */}
+      <div className="glass-card p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-lg font-semibold">APScheduler</div>
+            <div className={`text-sm ${stats?.scheduler_running ? 'text-emerald-400' : 'text-red-400'}`}>
+              {stats?.scheduler_running ? 'Running' : 'Stopped'}
+            </div>
+          </div>
+          <div className={`w-3 h-3 rounded-full ${stats?.scheduler_running ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`}></div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -557,6 +723,195 @@ function SettingsTab({ health, onAction, loading }: { health: SystemHealth | nul
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ApplicationsTab({ applications }: { applications: Application[] }) {
+  const statusColors: Record<string, string> = {
+    success: "bg-emerald-500/20 text-emerald-400",
+    failed: "bg-red-500/20 text-red-400",
+    pending: "bg-amber-500/20 text-amber-400",
+    retry: "bg-blue-500/20 text-blue-400",
+  };
+  
+  return (
+    <div className="glass-card overflow-hidden">
+      <table className="w-full">
+        <thead className="border-b border-border">
+          <tr className="text-left text-xs text-muted-foreground uppercase">
+            <th className="p-4">User</th>
+            <th className="p-4">Job</th>
+            <th className="p-4">Company</th>
+            <th className="p-4">Status</th>
+            <th className="p-4">Error</th>
+            <th className="p-4">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {applications.map(app => (
+            <tr key={app.id} className="border-b border-border">
+              <td className="p-4 text-sm">{app.user_email}</td>
+              <td className="p-4 text-sm">{app.job_title}</td>
+              <td className="p-4 text-sm">{app.company}</td>
+              <td className="p-4">
+                <span className={`px-2 py-1 rounded text-xs ${statusColors[app.status] || 'bg-zinc-500/20 text-zinc-400'}`}>
+                  {app.status}
+                </span>
+              </td>
+              <td className="p-4 text-sm text-red-400 max-w-[200px] truncate">{app.error || '-'}</td>
+              <td className="p-4 text-sm text-muted-foreground">{new Date(app.created_at).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function JobsTab({ jobs }: { jobs: Job[] }) {
+  return (
+    <div className="glass-card overflow-hidden">
+      <table className="w-full">
+        <thead className="border-b border-border">
+          <tr className="text-left text-xs text-muted-foreground uppercase">
+            <th className="p-4">Title</th>
+            <th className="p-4">Company</th>
+            <th className="p-4">Source</th>
+            <th className="p-4">Status</th>
+            <th className="p-4">Scraped</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map(job => (
+            <tr key={job.id} className="border-b border-border">
+              <td className="p-4 text-sm">{job.title}</td>
+              <td className="p-4 text-sm">{job.company}</td>
+              <td className="p-4 text-sm">{job.source}</td>
+              <td className="p-4">
+                <span className={`px-2 py-1 rounded text-xs ${job.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400'}`}>
+                  {job.status}
+                </span>
+              </td>
+              <td className="p-4 text-sm text-muted-foreground">{new Date(job.scraped_at).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AnalyticsTab({ data }: { data: AnalyticsData | null }) {
+  if (!data) return <div className="glass-card p-8 text-center text-muted-foreground">No analytics data available</div>;
+  
+  const maxApp = Math.max(...data.applications_by_day.map(d => d.count), 1);
+  const maxRev = Math.max(...data.revenue_by_day.map(d => d.amount), 1);
+  
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4">Applications (Last 7 Days)</h3>
+          <div className="space-y-2">
+            {data.applications_by_day.slice(-7).map(d => (
+              <div key={d.date} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-20">{d.date}</span>
+                <div className="flex-1 h-6 bg-muted rounded overflow-hidden">
+                  <div className="h-full bg-brand-purple" style={{ width: `${(d.count / maxApp) * 100}%` }}></div>
+                </div>
+                <span className="text-xs w-8">{d.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4">Revenue (Last 7 Days)</h3>
+          <div className="space-y-2">
+            {data.revenue_by_day.slice(-7).map(d => (
+              <div key={d.date} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-20">{d.date}</span>
+                <div className="flex-1 h-6 bg-muted rounded overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${(d.amount / maxRev) * 100}%` }}></div>
+                </div>
+                <span className="text-xs w-16">₹{d.amount}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeaturesTab({ flags }: { flags: FeatureFlag[] }) {
+  const defaultFlags: FeatureFlag[] = [
+    { key: "auto_apply", label: "Auto Apply", description: "Automatically apply to matching jobs", enabled: true },
+    { key: "ai_chat", label: "AI Chat", description: "AI-powered chat support", enabled: true },
+    { key: "payments", label: "Payments", description: "Enable payment system", enabled: true },
+    { key: "scraper", label: "Scraper", description: "Enable job scraping", enabled: true },
+    { key: "maintenance", label: "Maintenance Mode", description: "Show maintenance page to users", enabled: false },
+  ];
+  
+  const displayFlags = flags.length > 0 ? flags : defaultFlags;
+  
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {displayFlags.map(flag => (
+        <div key={flag.key} className="glass-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="font-semibold">{flag.label}</div>
+              <div className="text-sm text-muted-foreground mt-1">{flag.description}</div>
+            </div>
+            <div className={`w-3 h-3 rounded-full ${flag.enabled ? 'bg-emerald-400' : 'bg-zinc-500'}`}></div>
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <span className={`text-xs px-2 py-1 rounded ${flag.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400'}`}>
+              {flag.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AuditTab({ logs }: { logs: AuditLog[] }) {
+  return (
+    <div className="glass-card overflow-hidden">
+      <table className="w-full">
+        <thead className="border-b border-border">
+          <tr className="text-left text-xs text-muted-foreground uppercase">
+            <th className="p-4">Admin</th>
+            <th className="p-4">Action</th>
+            <th className="p-4">Target</th>
+            <th className="p-4">IP Address</th>
+            <th className="p-4">Result</th>
+            <th className="p-4">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {logs.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="p-8 text-center text-muted-foreground">No audit logs</td>
+            </tr>
+          ) : logs.map(log => (
+            <tr key={log.id} className="border-b border-border">
+              <td className="p-4 text-sm">{log.admin_email}</td>
+              <td className="p-4 text-sm">{log.action}</td>
+              <td className="p-4 text-sm">{log.target}</td>
+              <td className="p-4 text-sm text-muted-foreground">{log.ip_address}</td>
+              <td className="p-4">
+                <span className={`px-2 py-1 rounded text-xs ${log.result === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {log.result}
+                </span>
+              </td>
+              <td className="p-4 text-sm text-muted-foreground">{new Date(log.created_at).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

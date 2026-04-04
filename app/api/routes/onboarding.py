@@ -19,7 +19,7 @@ from app.core.database import get_db_context
 from app.models.user import User
 from app.services.onboarding_service import OnboardingService, OnboardingStep
 
-router = APIRouter(prefix="/api/v1/onboarding", tags=["onboarding"])
+router = APIRouter(prefix="/v1/onboarding", tags=["onboarding"])
 
 
 # ── Request Models ────────────────────────────────────────────────

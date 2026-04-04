@@ -102,18 +102,57 @@ class OverleafService:
             {
                 "name": "default",
                 "description": "Moderncv (modern LaTeX resume class)",
-                "style": "casual"
+                "style": "casual",
+                "preview_img_url": "/templates/default-preview.svg"
+            },
+            {
+                "name": "resume_academic",
+                "description": "Academic CV template",
+                "style": "academic",
+                "preview_img_url": "/templates/academic-preview.svg"
+            },
+            {
+                "name": "resume_mteck",
+                "description": "Tech/Engineering resume template",
+                "style": "professional",
+                "preview_img_url": "/templates/mteck-preview.svg"
+            },
+            {
+                "name": "resume_puneet",
+                "description": "Modern professional template",
+                "style": "professional",
+                "preview_img_url": "/templates/puneet-preview.svg"
+            },
+            {
+                "name": "resume_harshibar",
+                "description": "Clean minimalist template",
+                "style": "modern",
+                "preview_img_url": "/templates/harshibar-preview.svg"
+            },
+            {
+                "name": "resume_iiit",
+                "description": "IIIT style academic template",
+                "style": "academic",
+                "preview_img_url": "/templates/iiit-preview.svg"
+            },
+            {
+                "name": "resume_professional",
+                "description": "Corporate professional template",
+                "style": "professional",
+                "preview_img_url": "/templates/professional-preview.svg"
             }
         ]
         
         # Load custom templates from templates directory
         if self.TEMPLATE_DIR.exists():
             for f in self.TEMPLATE_DIR.glob("*.tex"):
-                templates.append({
-                    "name": f.stem,
-                    "description": f.name,
-                    "filename": f.name
-                })
+                if f.stem not in [t["name"] for t in templates]:
+                    templates.append({
+                        "name": f.stem,
+                        "description": f.name,
+                        "filename": f.name,
+                        "preview_img_url": f"/templates/{f.stem}-preview.svg"
+                    })
         
         return templates
 

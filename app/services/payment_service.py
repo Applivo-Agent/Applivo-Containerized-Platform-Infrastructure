@@ -162,6 +162,34 @@ class PaymentService:
             payment.subscription_id = sub.id
             await db.commit()
 
+            # Send payment success notification
+            try:
+                from app.services.notification_service import NotificationService
+                await NotificationService().notify(
+                    title="🎉 Payment Successful - You're All Set!",
+                    body=f"""Congratulations! Your {plan.value.upper()} plan has been activated.
+
+What's included:
+• Unlimited job searches and applications
+• AI-powered resume tailoring
+• Auto-apply to matching opportunities
+• Interview preparation materials
+• Priority support
+
+Your subscription is valid until {sub.end_date.strftime('%B %d, %Y') if sub.end_date else '30 days from now'}.
+
+Need help? Reply to this email or visit your dashboard.
+
+Welcome to Applivo — let's find your dream job!
+
+— Team Applivo""",
+                    event_type="payment_success",
+                    data={"plan": plan.value, "amount": payment.amount},
+                    user_id=payment.user_id,
+                )
+            except Exception as e:
+                logger.warning("Failed to send payment notification", error=str(e))
+
             logger.info(
                 "Payment verified and subscription activated",
                 user_id=payment.user_id,

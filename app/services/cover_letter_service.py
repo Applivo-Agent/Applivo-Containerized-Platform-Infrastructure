@@ -12,16 +12,18 @@ from typing import Optional
 
 import structlog
 from openai import AsyncOpenAI
-from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.database import get_db_context
-from app.models.job import Job, JobAnalysis
-from app.models.resume import CoverLetter
-from app.models.user import UserProfile, UserSkill
 
 logger = structlog.get_logger()
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+if settings.ai_api_key:
+    client = AsyncOpenAI(
+        api_key=settings.ai_api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
+else:
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 COVER_LETTER_PROMPT = """
 You are an expert career coach writing a personalized cover letter.

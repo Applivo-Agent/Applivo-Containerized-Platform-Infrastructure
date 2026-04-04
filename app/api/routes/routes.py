@@ -10,7 +10,7 @@ app/api/routes/chat.py          — AI assistant
 #  applications.py
 # ═══════════════════════════════════════════════════════════════════════════
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -565,10 +565,16 @@ async def get_latex_template():
 
 @resumes_router.post("/latex/template/select", response_model=dict)
 async def select_latex_template(
-    template_name: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
 ):
     """Select a template by name (e.g., 'default', 'mteck')."""
+    body = await request.json()
+    template_name = body.get("template_name")
+    
+    if not template_name:
+        return {"success": False, "error": "template_name is required"}
+    
     from app.services.overleaf_service import OverleafService
     service = OverleafService()
     try:
@@ -608,7 +614,7 @@ async def _trigger_resume_generation(user_id: str, job_id: str, base_resume_id: 
 cover_letters_router = APIRouter(prefix="/cover-letters", tags=["Cover Letters"])
 
 
-@cover_letters_router.post("/generate", response_model=CoverLetterOut, status_code=201)
+@cover_letters_router.post("/generate", status_code=202)
 async def generate_cover_letter(
     payload: CoverLetterGenerateRequest,
     background_tasks: BackgroundTasks,
@@ -616,7 +622,7 @@ async def generate_cover_letter(
     current_user: User = Depends(get_current_user),
 ):
     background_tasks.add_task(_trigger_cover_letter_gen, current_user.id, payload.job_id, payload.tone)
-    return MessageResponse(message="Cover letter generation queued")
+    return {"message": "Cover letter generation started", "job_id": payload.job_id}
 
 
 @cover_letters_router.get("", response_model=List[CoverLetterOut])
@@ -632,12 +638,51 @@ async def list_cover_letters(
     return result.scalars().all()
 
 
+@cover_letters_router.delete("/{letter_id}")
+async def delete_cover_letter(
+    letter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    
+    await db.delete(letter)
+    await db.commit()
+    return {"success": True, "message": "Cover letter deleted"}
+
+
+@cover_letters_router.get("/{letter_id}")
+async def get_cover_letter(
+    letter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    return letter
+
+
 async def _trigger_cover_letter_gen(user_id: str, job_id: str, tone: str):
+    from app.services.cover_letter_service import CoverLetterService
     try:
-        from app.agents.tasks import generate_cover_letter_task
-        generate_cover_letter_task.delay(user_id, job_id, tone)
-    except Exception:
-        pass
+        await CoverLetterService().generate(user_id, job_id, tone)
+    except Exception as e:
+        logger.error(f"Cover letter generation failed: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -770,6 +815,17 @@ async def trigger_agent_manually(
             detail=f"Unknown task type: {task_type}. Supported: {sorted(SUPPORTED_TASKS)}",
         )
 
+    # Check if user has active subscription for any agent tasks
+    from app.services.subscription_service import SubscriptionService
+    sub_service = SubscriptionService()
+    sub = await sub_service.get_active_subscription(current_user.id)
+    
+    if not sub or not sub.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Active subscription required to use agent features. Please subscribe at /subscription",
+        )
+
     log.info("Triggering task", task_type=task_type)
     t0 = time.perf_counter()
 
@@ -777,7 +833,7 @@ async def trigger_agent_manually(
         # ── scrape_jobs ─────────────────────────────────────────────────────
         if task_type == "scrape_jobs":
             from app.agents.scrapers.internshala import IntershalaScraper
-            result = await IntershalaScraper().run()
+            result = await IntershalaScraper(user_id=current_user.id).run()
             elapsed = round(time.perf_counter() - t0, 1)
             jobs_found = result.get("jobs_found", 0)
             log.info("Scrape complete", jobs_found=jobs_found, elapsed=elapsed)
@@ -1271,3 +1327,46 @@ async def get_conversion_funnel(
         "interview": counts.get("interview_scheduled", 0) + counts.get("interview_completed", 0),
         "offer": counts.get("offer_received", 0) + counts.get("offer_accepted", 0),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Interviews API
+# ═══════════════════════════════════════════════════════════════════════════
+
+from app.models.interview import MockInterviewSession
+
+
+@cover_letters_router.post("/interview/start")
+async def start_mock_interview(
+    job_role: str,
+    interview_type: str = Query(default="technical"),
+    current_user: User = Depends(get_current_user),
+):
+    """Start a new mock interview session."""
+    from app.agents.tasks import start_mock_interview_task
+    task = start_mock_interview_task.delay(current_user.id, job_role, interview_type)
+    return {"session_id": task.id, "status": "started", "job_role": job_role}
+
+
+@cover_letters_router.get("/interview/sessions")
+async def list_interview_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all mock interview sessions."""
+    result = await db.execute(
+        select(MockInterviewSession)
+        .where(MockInterviewSession.user_id == current_user.id)
+        .order_by(desc(MockInterviewSession.created_at))
+    )
+    sessions = result.scalars().all()
+    return [
+        {
+            "id": s.id,
+            "job_role": s.interview_id if s.interview_id else "General",
+            "overall_score": s.overall_score,
+            "duration_seconds": s.duration_seconds,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in sessions
+    ]

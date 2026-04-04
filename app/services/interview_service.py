@@ -123,19 +123,21 @@ class InterviewPrepService:
             await db.commit()
 
             # Send notification
-            from app.services.job_analyzer import NotificationService
+            from app.services.notification_service import NotificationService
             scheduled_str = interview.scheduled_at.strftime("%B %d at %I:%M %p") if interview.scheduled_at else "soon"
             await NotificationService().notify(
-                title=f"🎯 Interview Prep Ready — {job.company_name}",
+                title=f"🎯 Interview Prep Ready - {job.company_name}",
                 body=(
-                    f"Your {interview.interview_type} interview with {job.company_name} is scheduled {scheduled_str}.\n\n"
-                    f"Prep material generated:\n"
-                    f"• {len(interview.technical_questions)} technical questions\n"
-                    f"• {len(interview.behavioral_questions)} behavioral questions\n"
-                    f"• {len(interview.study_topics)} study topics\n\n"
-                    f"Top tip: {company_report.get('company_tips', questions.get('company_tips', ''))}"
+                    f"Great news! Your {interview.interview_type} interview with {job.company_name} is scheduled for {scheduled_str}.\n\n"
+                    f"We've prepared everything you need:\n"
+                    f"📝 {len(interview.technical_questions)} technical questions to practice\n"
+                    f"💬 {len(interview.behavioral_questions)} behavioral questions to prepare for\n"
+                    f"📚 {len(interview.study_topics)} key topics to review\n\n"
+                    f"💡 Pro tip: {company_report.get('company_tips', questions.get('company_tips', 'Focus on demonstrating your problem-solving skills.'))}\n\n"
+                    f"Good luck! You've got this! 🚀"
                 ),
                 event_type="interview_prep_ready",
+                user_id=interview.user_id,
             )
 
             logger.info("Interview prep complete", interview_id=interview_id, company=job.company_name)

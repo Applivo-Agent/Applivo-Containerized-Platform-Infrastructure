@@ -169,8 +169,8 @@ class ApplicationService:
         if queued > 0:
             from app.services.notification_service import NotificationService
             await NotificationService().notify(
-                title=f"{queued} Applications Queued",
-                body=f"{queued} jobs matched your criteria and are {'waiting for approval' if profile.require_apply_approval else 'being applied to automatically'}.",
+                title=f"🚀 {queued} Applications Queued!",
+                body=f"Great news! We've found {queued} jobs that match your profile and criteria. They're now {'waiting for your approval' if profile.require_apply_approval else 'being applied to automatically'}.\n\nKeep an eye on your dashboard to track progress. Each application is tailored to highlight your best skills!\n\n— Applivo AI",
                 event_type="applications_queued",
                 data={"count": queued},
                 user_id=user.id,

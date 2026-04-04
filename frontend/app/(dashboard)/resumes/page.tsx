@@ -126,32 +126,38 @@ export default function ResumesPage() {
            <p className="text-sm text-muted-foreground mt-1">When the bot applies, it dynamically injects ATS keywords into your profile data and compiles one of these templates.</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
-           {templates?.available?.map((tpl: any) => {
-              const isSelected = templates.selected === tpl.name;
-              const isLocked = tpl.tier !== "starter" && tpl.tier === "premium" && !isPremium || tpl.tier === "pro" && !isPro && !isPremium;
+         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+            {templates?.available?.map((tpl: any) => {
+               const isSelected = templates.selected === tpl.name;
+               const isLocked = tpl.tier !== "starter" && tpl.tier === "premium" && !isPremium || tpl.tier === "pro" && !isPro && !isPremium;
 
-              return (
-                 <div key={tpl.name} className={cn("relative group rounded-xl overflow-hidden border-2 transition-all cursor-pointer", isSelected ? "border-brand-purple shadow-lg shadow-brand-purple/20" : "border-border/50 hover:border-brand-purple/50")} onClick={() => !isLocked && selectTemplate.mutate(tpl.name)}>
-                    <div className="aspect-[1/1.4] bg-muted/30 p-2">
-                       <img src={tpl.preview_img_url} alt={tpl.name} className={cn("w-full h-full object-cover rounded shadow-sm opacity-80 group-hover:opacity-100 transition-opacity", isLocked ? "blur-[2px] opacity-40 grayscale" : "")} />
-                    </div>
-                    {isLocked && (
-                       <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/50 backdrop-blur-[2px]">
-                          <Lock className="w-6 h-6 text-amber-400 mb-2" />
-                          <span className="text-xs font-bold px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full capitalize">{tpl.tier} Plan</span>
-                       </div>
-                    )}
-                    <div className="absolute bottom-0 inset-x-0 p-3 bg-background/90 backdrop-blur flex items-center justify-between border-t border-border">
-                       <div>
-                          <p className="font-medium text-sm capitalize">{tpl.name.replace("-", " ")}</p>
-                          <p className="text-[10px] text-muted-foreground">{tpl.description}</p>
-                       </div>
-                       {isSelected ? <CheckCircle2 className="w-5 h-5 text-brand-purple-light" /> : <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/30 group-hover:border-brand-purple/50" />}
-                    </div>
-                 </div>
-              );
-           })}
+               return (
+                  <div key={tpl.name} className={cn("relative group rounded-xl overflow-hidden border-2 transition-all cursor-pointer", isSelected ? "border-brand-purple shadow-lg shadow-brand-purple/20" : "border-border/50 hover:border-brand-purple/50")} onClick={() => !isLocked && selectTemplate.mutate(tpl.name)}>
+                     <div className="aspect-[1/1.4] bg-muted/30 p-2">
+                        {tpl.preview_img_url ? (
+                           <img src={tpl.preview_img_url} alt={tpl.name} className={cn("w-full h-full object-contain rounded shadow-sm opacity-80 group-hover:opacity-100 transition-opacity", isLocked ? "blur-[2px] opacity-40 grayscale" : "")} />
+                        ) : (
+                           <div className="w-full h-full flex items-center justify-center">
+                              <FileText className="w-16 h-16 text-muted-foreground/30" />
+                           </div>
+                        )}
+                     </div>
+                     {isLocked && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/50 backdrop-blur-[2px]">
+                           <Lock className="w-6 h-6 text-amber-400 mb-2" />
+                           <span className="text-xs font-bold px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full capitalize">{tpl.tier} Plan</span>
+                        </div>
+                     )}
+                     <div className="absolute bottom-0 inset-x-0 p-3 bg-background/90 backdrop-blur flex items-center justify-between border-t border-border">
+                        <div>
+                           <p className="font-medium text-sm capitalize">{tpl.name.replace(/-/g, " ").replace(/_/g, " ")}</p>
+                           <p className="text-[10px] text-muted-foreground">{tpl.description}</p>
+                        </div>
+                        {isSelected ? <CheckCircle2 className="w-5 h-5 text-brand-purple-light" /> : <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/30 group-hover:border-brand-purple/50" />}
+                     </div>
+                  </div>
+               );
+            })}
         </div>
       </div>
     </div>

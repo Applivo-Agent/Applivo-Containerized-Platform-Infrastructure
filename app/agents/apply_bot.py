@@ -215,7 +215,7 @@ class ApplyBot:
                             resume_record.times_used += 1
 
                     # Send rich success notification only for genuine new submissions
-                    from app.services.job_analyzer import NotificationService
+                    from app.services.notification_service import NotificationService
                     import re as _re
 
                     # ── Resolve company name ──────────────────────────────────
@@ -333,9 +333,10 @@ class ApplyBot:
                         lines.append(f"\n🔗 {job.source_url}")
 
                     await NotificationService().notify(
-                        title=f"✅ Applied — {company}",
-                        body="\n".join(lines),
+                        title=f"🎉 Application Sent - {role} at {company}",
+                        body="✅ " + "\n".join(lines),
                         event_type="application_submitted",
+                        user_id=app_record.user_id,
                     )
 
             elif result.get("captcha"):
@@ -348,11 +349,12 @@ class ApplyBot:
                     details=result,
                 ))
                 # Notify user to solve CAPTCHA
-                from app.services.job_analyzer import NotificationService
+                from app.services.notification_service import NotificationService
                 await NotificationService().notify(
-                    title=f"⚠️ CAPTCHA Required — {job.company_name if job else 'Company'}",
-                    body=f"The application bot hit a CAPTCHA on {job.company_name if job else 'company'}. Please apply manually.\n\n{job.source_url if job else ''}",
+                    title=f"⚠️ CAPTCHA Required - {job.company_name if job else 'Company'}",
+                    body=f"We need your help! The application bot hit a CAPTCHA challenge on your application for {role} at {company}.\n\nPlease complete it manually here:\n{job.source_url if job else ''}\n\nDon't worry - we'll handle the rest once you're through!",
                     event_type="captcha_detected",
+                    user_id=app_record.user_id,
                 )
             elif result.get("ineligible"):
                 # Mark as SKIPPED instead of FAILED to prevent retrying ineligible jobs

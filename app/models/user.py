@@ -64,6 +64,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     skills: Mapped[List["UserSkill"]] = relationship(
         "UserSkill", back_populates="user", cascade="all, delete-orphan"
     )
+    sessions: Mapped[List["UserSession"]] = relationship(
+        "UserSession", back_populates="user", cascade="all, delete-orphan"
+    )
     credentials: Mapped[List["CredentialVault"]] = relationship(
         "CredentialVault", back_populates="user", cascade="all, delete-orphan"
     )
@@ -186,3 +189,36 @@ class UserSkill(Base, UUIDMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<UserSkill {self.name} ({self.proficiency})>"
+
+
+class UserSession(Base, UUIDMixin, TimestampMixin):
+    """
+    User session tracking for multi-device login and security.
+    Tracks device info, IP, location, and allows session revocation.
+    """
+    __tablename__ = "user_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id", name="uq_user_device_session"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    device_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    device_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    browser: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    os: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    refresh_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_token_jti: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+    def __repr__(self) -> str:
+        return f"<UserSession user_id={self.user_id} device={self.device_name}>"
+
