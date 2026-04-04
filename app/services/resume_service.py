@@ -121,7 +121,11 @@ class ResumeService:
                     ],
                 
                 )
-                tailored_data = json.loads(response.choices[0].message.content)
+                content = response.choices[0].message.content
+                if not content or content.startswith("% Error"):
+                    logger.warning("Resume generation returned empty or error", content=content)
+                    raise ValueError("LLM returned empty response")
+                tailored_data = json.loads(content)
                 tokens_used = response.usage.total_tokens
             except Exception as e:
                 logger.error("Resume generation LLM failed", error=str(e))

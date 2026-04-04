@@ -7,8 +7,11 @@ Handles plan viewing, plan listing, and subscription management.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
@@ -18,6 +21,9 @@ from app.models.subscription import (
     PLAN_PRICES,
     PLAN_DAILY_LIMITS,
     PLAN_PRIORITY,
+    PLAN_MONTHLY_AI_CREDITS,
+    Subscription,
+    SubscriptionStatus,
 )
 from app.services.subscription_service import subscription_service
 
@@ -122,10 +128,43 @@ async def get_current_subscription(
             "start_date": sub.start_date.isoformat(),
             "end_date": sub.end_date.isoformat() if sub.end_date else None,
             "daily_limit": sub.daily_limit,
-            "price": sub.price,
         },
         "features": features,
     }
+
+
+@router.post("/activate/free")
+async def activate_free_plan(
+    current_user: User = Depends(get_current_user),
+):
+    """Activate free starter plan for testing."""
+    from app.models.subscription import Subscription, SubscriptionStatus
+    from app.core.database import get_db_context
+    
+    async with get_db_context() as db:
+        existing = await db.execute(
+            select(Subscription).where(Subscription.user_id == current_user.id)
+        )
+        existing_sub = existing.scalar_one_or_none()
+        
+        if existing_sub:
+            existing_sub.status = SubscriptionStatus.ACTIVE
+            existing_sub.plan = PlanTier.STARTER
+            existing_sub.start_date = datetime.now(timezone.utc)
+            existing_sub.end_date = datetime.now(timezone.utc) + timedelta(days=30)
+        else:
+            sub = Subscription(
+                user_id=current_user.id,
+                plan=PlanTier.STARTER,
+                status=SubscriptionStatus.ACTIVE,
+                start_date=datetime.now(timezone.utc),
+                end_date=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+            db.add(sub)
+        
+        await db.commit()
+    
+    return {"active": True, "plan": "starter", "message": "Free plan activated for testing"}
 
 
 @router.post("/cancel")

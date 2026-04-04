@@ -44,11 +44,13 @@ class SubscriptionService:
                 .limit(1)
             )
             sub = result.scalar_one_or_none()
-            if sub and sub.end_date and sub.end_date < datetime.now(timezone.utc):
-                sub.status = SubscriptionStatus.EXPIRED
-                await session.commit()
-                logger.info("Subscription expired", user_id=user_id, sub_id=sub.id)
-                return None
+            if sub and sub.end_date:
+                end_date = sub.end_date.replace(tzinfo=timezone.utc) if sub.end_date.tzinfo is None else sub.end_date
+                if end_date < datetime.now(timezone.utc):
+                    sub.status = SubscriptionStatus.EXPIRED
+                    await session.commit()
+                    logger.info("Subscription expired", user_id=user_id, sub_id=sub.id)
+                    return None
             return sub
 
         if db:

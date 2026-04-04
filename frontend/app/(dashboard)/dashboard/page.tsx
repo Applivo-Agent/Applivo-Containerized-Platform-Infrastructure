@@ -63,6 +63,18 @@ export default function DashboardPage() {
     onError: () => toast.error("Failed to start agent"),
   });
 
+  const runAnalyzeQueue = useMutation({
+    mutationFn: () => agentApi.run({ task_type: "analyze_and_queue" }),
+    onSuccess: (res: any) => toast.success(`Analyzed ${res.data.analyzed} jobs, queued ${res.data.queued} for applying`),
+    onError: () => toast.error("Failed to analyze and queue"),
+  });
+
+  const runApply = useMutation({
+    mutationFn: () => agentApi.run({ task_type: "apply_queued" }),
+    onSuccess: (res: any) => toast.success(`Applied to ${res.data.applied} jobs!`),
+    onError: () => toast.error("Failed to apply"),
+  });
+
   const stats = dashboard ? [
     { icon: Briefcase, label: "Total Jobs", value: dashboard.total_jobs, sub: `${dashboard.jobs_today} today`, color: "bg-blue-500/20" },
     { icon: TrendingUp, label: "High Match Jobs", value: dashboard.high_match_jobs, sub: "≥75% match score", color: "bg-emerald-500/20" },
@@ -83,14 +95,32 @@ export default function DashboardPage() {
           </h1>
           <p className="text-muted-foreground text-sm mt-1">Here's your job automation dashboard</p>
         </div>
-        <button
-          onClick={() => runAgent.mutate()}
-          disabled={runAgent.isPending}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-purple text-white rounded-lg text-sm font-medium hover:bg-brand-purple/90 transition-all disabled:opacity-50"
-        >
-          {runAgent.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          Run Now
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => runAgent.mutate()}
+            disabled={runAgent.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-purple text-white rounded-lg text-sm font-medium hover:bg-brand-purple/90 transition-all disabled:opacity-50"
+          >
+            {runAgent.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            Scrape
+          </button>
+          <button
+            onClick={() => runAnalyzeQueue.mutate()}
+            disabled={runAnalyzeQueue.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-600/90 transition-all disabled:opacity-50"
+          >
+            {runAnalyzeQueue.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            Analyze & Queue
+          </button>
+          <button
+            onClick={() => runApply.mutate()}
+            disabled={runApply.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-600/90 transition-all disabled:opacity-50"
+          >
+            {runApply.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Apply Now
+          </button>
+        </div>
       </div>
 
       {/* Pending approval banner */}

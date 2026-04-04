@@ -126,6 +126,7 @@ export const analyticsApi = {
 export const chatApi = {
   send: (data: { message: string; history: { role: string; content: string }[] }) =>
     api.post("/chat", data),
+  credits: () => api.get("/chat/credits"),
 };
 
 // ─── Subscriptions ────────────────────────────────────────────────────────
@@ -144,14 +145,17 @@ export const paymentsApi = {
 
 // ─── Quotas ───────────────────────────────────────────────────────────────
 export const quotasApi = {
-  status: () => api.get("/quotas/status"),
+  status: () => api.get("/quota/"),
 };
 
 // ─── Platform ─────────────────────────────────────────────────────────────
 export const platformApi = {
-  cookies: () => api.get("/platform/cookies"),
-  addCookie: (data: Record<string, unknown>) => api.post("/platform/cookies", data),
-  deleteCookie: (id: string) => api.delete(`/platform/cookies/${id}`),
+  status: () => api.get("/platform/status"),
+  connect: (data: Record<string, unknown>) => api.post("/platform/connect", data),
+  login: (platform: string, data: { email: string; password: string }) =>
+    api.post(`/platform/login/${platform}`, data),
+  validate: (data: Record<string, unknown>) => api.post("/platform/validate", data),
+  invalidate: (platform: string) => api.post(`/platform/invalidate/${platform}`),
 };
 
 // ─── Settings ─────────────────────────────────────────────────────────────

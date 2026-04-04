@@ -86,7 +86,7 @@ async def _ai_answer(question: str, options: list, profile_summary: str, job_con
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
         )
-        answer = resp.choices[0].message.content.strip().strip('"').strip("'")
+        answer = (resp.choices[0].message.content or "").strip().strip('"').strip("'")
         logger.info("AI answered screening question",
                     question=question[:80], answer=answer[:80])
         return answer
@@ -798,7 +798,7 @@ async def _find_submit_button(page):
         try:
             if not await btn.is_visible():
                 continue
-            txt = (await btn.inner_text()).strip().lower()
+            txt = ((await btn.inner_text()) or "").strip().lower()
             if txt in ("apply now", "apply", "easy apply") or len(txt) > 50:
                 continue
             if any(w in txt for w in ("submit", "send application", "submit application")):
@@ -1033,14 +1033,26 @@ async def _fill_application_form(
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
+async def apply_internshala(page, job, profile, resume, settings_obj, user_id: str = None) -> dict:
     context = page.context
 
+    # First try to load from file (legacy)
     cookies = _load_cookies()
+    
+    # If no file cookies, try to load from database
+    if not cookies and user_id:
+        try:
+            from app.services.cookie_service import cookie_service
+            cookies = await cookie_service.get_cookies(user_id, "internshala")
+            if cookies:
+                logger.info("Loaded cookies from database", count=len(cookies))
+        except Exception as e:
+            logger.warning("Could not load cookies from database", error=str(e))
+    
     if cookies:
         try:
             await context.add_cookies(cookies)
-            logger.info("Loaded cookies", count=len(cookies))
+            logger.info("Injected cookies", count=len(cookies))
         except Exception as e:
             logger.warning("Could not inject cookies", error=str(e))
 
@@ -1117,7 +1129,9 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
         }
 
     html_check = (await page.content()).lower()
-    # More specific eligibility checks - look for actual eligibility banners/messages
+    # Don't return early on eligibility check - continue and try to click anyway
+    # Sometimes the banner is shown but applying still works after profile update
+    # Only log it but don't block the attempt
     if any(x in html_check for x in (
         "you are not eligible for this internship",
         "you're not eligible",
@@ -1125,15 +1139,16 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
         "not_eligible_banner",
         "eligibility-criteria-not-met",
     )):
-        return {"success": False, "error": "Not eligible for this internship"}
-    # Check for eligibility banner element with specific message
+        logger.warning("Eligibility warning found in page HTML - will still attempt apply")
+        # Don't return here - try to apply anyway
+    # Check for eligibility banner element - but don't block, just log it
     eligibility_banner = await page.query_selector(
         ".not-eligible, .ineligible, [class*='not-eligible'], [class*='ineligible']"
     )
     if eligibility_banner and await eligibility_banner.is_visible():
-        banner_text = await eligibility_banner.inner_text()
-        logger.warning("Eligibility banner found", text=banner_text[:200])
-        return {"success": False, "error": f"Not eligible: {banner_text.strip()[:150]}"}
+        banner_text = (await eligibility_banner.inner_text()) or ""
+        logger.warning("Eligibility banner found - will still attempt apply", text=banner_text[:200])
+        # Don't return here - try to apply anyway
     if any(x in html_check for x in (
         "hiring closed", "no longer accepting", "internship closed", "applications closed"
     )):
@@ -1187,7 +1202,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
                 "[data-testid*='apply']", "button[data-testid*='apply']",
             ):
                 el = await page.query_selector(sel)
-                if el and await el.is_visible() and len((await el.inner_text()).strip()) < 30:
+                if el and await el.is_visible() and len(((await el.inner_text()) or "").strip()) < 30:
                     apply_btn = el
                     logger.info("Found apply button by text", selector=sel)
                     break
@@ -1210,7 +1225,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
         return {"success": False, "error": "No Apply button found on detail page"}
 
     # Check if button is disabled with specific message before trying to click
-    btn_text = (await apply_btn.inner_text()).strip().lower()
+    btn_text = ((await apply_btn.inner_text()) or "").strip().lower()
     is_disabled = await apply_btn.get_attribute("disabled")
     
     logger.info("Checking apply button state", text=btn_text[:100], has_disabled_attr=is_disabled is not None)
@@ -1220,40 +1235,54 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
         logger.info("Already applied to this internship")
         return {"success": True, "already_applied": True, "ats": "internshala", "verified": True}
     
-    # Check for "not eligible"
-    if "not eligible" in btn_text:
-        return {"success": False, "error": "Not eligible for this internship (location or criteria mismatch)"}
-    
-    # Check if button is disabled for other reasons
-    if is_disabled is not None:
-        logger.warning("Apply button is disabled", text=btn_text[:100])
-        return {"success": False, "error": f"Apply button is disabled: {btn_text[:100]}"}
+    # Even if button shows "not eligible" or disabled, try clicking anyway
+    # (sometimes Internshala enables it after profile update, or it's just a UI glitch)
+    logger.info("Processing apply button", has_not_eligible="not eligible" in btn_text, is_disabled=is_disabled is not None)
+    if "not eligible" in btn_text or is_disabled is not None:
+        logger.warning("Button shows disabled/not eligible - attempting click anyway", text=btn_text[:100])
+        btn_was_disabled = True
+    else:
+        btn_was_disabled = False
 
-    # Try to scroll button into view and wait for it to be enabled
-    try:
-        await apply_btn.scroll_into_view_if_needed()
-        await page.evaluate("function(el) { el.scrollIntoView({behavior: 'smooth', block: 'center'}); }", apply_btn)
-        await asyncio.sleep(2)
-        
-        # Wait for button to be enabled (max 10 seconds)
-        for wait_attempt in range(20):
-            is_disabled = await apply_btn.get_attribute("disabled")
-            is_enabled = await apply_btn.is_enabled()
+    # Skip waiting loop for disabled buttons - go directly to click attempt
+    if btn_was_disabled:
+        logger.info("Skipping wait loop - going directly to click attempt")
+
+    # Skip waiting loop for disabled buttons - go directly to JS click attempt
+    if btn_was_disabled:
+        logger.info("Skipping wait loop - going directly to click attempt")
+    else:
+        # Try to scroll button into view and wait for it to be enabled
+        try:
+            await apply_btn.scroll_into_view_if_needed()
+            await page.evaluate("function(el) { el.scrollIntoView({behavior: 'smooth', block: 'center'}); }", apply_btn)
+            await asyncio.sleep(2)
             
-            if is_enabled and not is_disabled:
-                logger.info("Apply button is now enabled")
-                break
-            
-            # If button has "apply" text and looks like the right button, try JS click anyway
-            btn_text = (await apply_btn.inner_text()).lower()
-            if "apply" in btn_text and len(btn_text) < 30:
-                logger.info("Button has apply text but reports disabled - attempting JS click anyway")
-                break
-            
-            logger.info("Apply button not ready, waiting...", is_enabled=is_enabled, is_disabled=is_disabled)
-            await asyncio.sleep(0.5)
-    except Exception as e:
-        logger.warning("Could not wait for button enablement", error=str(e))
+            # Wait for button to be enabled (max 10 seconds)
+            button_clicked = False
+            for wait_attempt in range(20):
+                is_disabled = await apply_btn.get_attribute("disabled")
+                is_enabled = await apply_btn.is_enabled()
+                
+                if is_enabled and not is_disabled:
+                    logger.info("Apply button is now enabled")
+                    break
+                
+                # If button has "apply" text and looks like the right button, try JS click anyway
+                btn_text = ((await apply_btn.inner_text()) or "").lower()
+                if "apply" in btn_text and len(btn_text) < 30:
+                    logger.info("Button has apply text but reports disabled - attempting JS click anyway")
+                    break
+                    
+                # If button was disabled with "not eligible", still try JS click after waiting
+                if btn_was_disabled and wait_attempt >= 5:
+                    logger.info("Button still disabled but enough waiting - trying JS click")
+                    break
+                    
+                logger.info("Apply button not ready, waiting...", is_enabled=is_enabled, is_disabled=is_disabled)
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.warning("Could not wait for button enablement", error=str(e))
 
     href = await apply_btn.get_attribute("href") or ""
     logger.info("Apply button", href=href)
@@ -1266,34 +1295,150 @@ async def apply_internshala(page, job, profile, resume, settings_obj) -> dict:
         await _dismiss_blocking_modals_only(page)
     else:
         logger.info("Clicking Apply (AJAX modal)")
-        try:
-            # First try regular click
-            await apply_btn.click(timeout=5000)
-        except Exception as e:
-            logger.warning("Regular click failed, trying JS click", error=str(e))
-            try:
-                # Fallback to JavaScript click
-                await page.evaluate("(btn) => btn.click()", apply_btn)
-            except Exception as js_e:
-                logger.warning("JS click also failed, trying force click", error=str(js_e))
-                # Last resort: force click via evaluate
-                await page.evaluate("(btn) => { btn.dispatchEvent(new Event('click', {bubbles: true})); }", apply_btn)
+        await asyncio.sleep(1)
         
-        modal_opened = False
-        for _ in range(20):
-            await asyncio.sleep(0.5)
-            modal = await page.query_selector(
-                "#application_form, .application-modal, form[id*='apply'], "
-                ".modal.show form, .modal[style*='block'] form"
-            )
-            visible_tas = [ta for ta in await page.query_selector_all("textarea") if await ta.is_visible()]
-            if modal or visible_tas:
-                modal_opened = True
-                logger.info("Application modal opened")
-                break
-        if not modal_opened:
-            await _screenshot(page, "modal_did_not_open")
-            return {"success": False, "error": "Application modal did not open after clicking Apply"}
+        # Try multiple click methods - more aggressive approach
+        click_success = False
+        
+        # 1. First try clicking WITHOUT force (normal behavior)
+        try:
+            await apply_btn.click(timeout=3000)
+            click_success = True
+            logger.info("Regular click succeeded")
+        except Exception as e:
+            logger.warning("Regular click failed, trying with force", error=str(e))
+            try:
+                await apply_btn.click(force=True, timeout=3000)
+                click_success = True
+                logger.info("Force click succeeded")
+            except Exception as e2:
+                logger.warning("Force click also failed", error=str(e2))
+        
+        # 2. If regular click didn't work, try JS clicks
+        if not click_success:
+            try:
+                await page.evaluate("(btn) => btn.click()", apply_btn)
+                click_success = True
+                logger.info("JS click succeeded")
+            except Exception as js_e:
+                logger.warning("JS click failed", error=str(js_e))
+        
+        # 3. Try dispatchEvent as last resort
+        if not click_success:
+            try:
+                await page.evaluate("""(btn) => {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+                }""", apply_btn)
+                click_success = True
+                logger.info("dispatchEvent click succeeded")
+            except Exception as de:
+                logger.warning("dispatchEvent click failed", error=str(de))
+        
+        # 4. Last resort - directly navigate to apply URL if we can extract it
+        if not click_success:
+            # Try to get the href and navigate directly
+            apply_href = await apply_btn.get_attribute("href")
+            if apply_href and apply_href != "#":
+                logger.info("Click failed, but found href - navigating directly", href=apply_href)
+                if not apply_href.startswith("http"):
+                    apply_href = "https://internshala.com" + apply_href
+                await page.goto(apply_href, wait_until="networkidle", timeout=45000)
+                click_success = True
+                logger.info("Navigated to apply URL successfully")
+        
+        await asyncio.sleep(3)
+        
+        # Check what's on the page after clicking
+        page_content = await page.content()
+        page_html = page_content.lower() if page_content else ""
+        current_url = page.url
+        
+        logger.info("After click", url=current_url, has_not_eligible="not eligible" in page_html)
+        
+        # Check if navigation happened (some internships navigate to a new page)
+        if "apply" in current_url or "application" in current_url:
+            logger.info("URL changed to application page")
+            # This is good - we're on the application form page
+            modal_opened = True
+        else:
+            # Check if any modal or form appeared
+            modal_opened = False
+            has_error = False
+            checked_without_form = 0
+            
+            for check_num in range(30):  # Longer wait
+                await asyncio.sleep(0.5)
+                
+                # Check for any application form
+                modal = await page.query_selector(
+                    "#application_form, .application-modal, form[id*='apply'], "
+                    ".modal.show form, .modal[style*='block'] form, .apply-modal, #easy-apply-modal, .application-form-container"
+                )
+                visible_tas = [ta for ta in await page.query_selector_all("textarea") if await ta.is_visible()]
+                
+                # Also check for any form with inputs
+                visible_inputs = await page.query_selector_all("input:not([type='hidden'])")
+                visible_inputs = [inp for inp in visible_inputs if await inp.is_visible()]
+                
+                logger.info(f"Modal check #{check_num}", modal=bool(modal), textareas=len(visible_tas), inputs=len(visible_inputs))
+                
+                if modal or visible_tas or len(visible_inputs) > 3:
+                    modal_opened = True
+                    logger.info("Application modal/form opened", inputs=len(visible_inputs))
+                    break
+                
+                # If no form found after several checks, try refreshing the page - sometimes form loads after a moment
+                if check_num >= 10 and not modal_opened and checked_without_form == 0:
+                    checked_without_form += 1
+                    logger.info("No form found after 10 checks - refreshing page")
+                    await page.reload(wait_until="networkidle")
+                    await asyncio.sleep(2)
+                    
+                # Last resort: if still no form after 25 checks, try direct navigation to apply page
+                if check_num >= 25 and not modal_opened:
+                    # Try to get the current job URL and navigate to apply directly
+                    current_url = page.url
+                    if "internshala.com/internship/detail/" in current_url:
+                        apply_url = current_url.replace("/internship/detail/", "/internship/apply/") + "/"
+                        logger.info("No modal found - trying direct navigate to apply URL", url=apply_url)
+                        try:
+                            await page.goto(apply_url, wait_until="networkidle", timeout=30000)
+                            await asyncio.sleep(3)
+                            
+                            # Check what we got on the direct apply page
+                            page_content = await page.content()
+                            has_form = "<form" in page_content.lower()
+                            has_not_eligible = "not eligible" in page_content.lower()
+                            
+                            logger.info("Direct navigation result", url=apply_url, has_form=has_form, has_not_eligible=has_not_eligible)
+                            
+                            form_after_nav = await page.query_selector("form")
+                            if form_after_nav:
+                                logger.info("Form found after direct navigation!")
+                                modal_opened = True
+                                break
+                            elif has_not_eligible:
+                                # Even if no form, if page says not eligible, we know the answer
+                                logger.warning("Direct URL shows not eligible - skipping")
+                                break
+                        except Exception as nav_err:
+                            logger.warning("Direct navigation failed", error=str(nav_err))
+                    
+                # Check for error messages
+                error_elements = await page.query_selector_all(
+                    ".error-message, .alert-danger, [class*='error'], .warning-message, .not-eligible, [class*='not-eligible']"
+                )
+                # Check for visible error elements (but don't fail immediately)
+                has_error = False
+                for err in error_elements:
+                    if await err.is_visible():
+                        err_text = (await err.inner_text()) or ""
+                        logger.warning("Error element found after click", text=err_text[:100])
+                        has_error = True
+            
+            if not modal_opened:
+                await _screenshot(page, "modal_did_not_open")
+                return {"success": False, "error": "Application modal did not open after clicking Apply"}
 
     if await _is_on_login_wall(page):
         return {"success": False, "error": "Login wall after apply click. Session expired."}

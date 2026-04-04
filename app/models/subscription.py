@@ -58,6 +58,12 @@ PLAN_DAILY_LIMITS = {
     PlanTier.PREMIUM: 500,
 }
 
+PLAN_MONTHLY_AI_CREDITS = {
+    PlanTier.STARTER: 100,    # 100 AI chat messages/month
+    PlanTier.PRO: 500,        # 500 AI chat messages/month
+    PlanTier.PREMIUM: 999999, # Unlimited for premium
+}
+
 PLAN_PRIORITY = {
     PlanTier.STARTER: 1,
     PlanTier.PRO: 2,
@@ -113,6 +119,10 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
     @property
     def priority(self) -> int:
         return PLAN_PRIORITY.get(PlanTier(self.plan), 1)
+
+    @property
+    def ai_credits(self) -> int:
+        return PLAN_MONTHLY_AI_CREDITS.get(PlanTier(self.plan), 0)
 
     @property
     def price(self) -> int:

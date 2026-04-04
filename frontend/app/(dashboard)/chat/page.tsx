@@ -1,9 +1,9 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { chatApi } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Bot, User as UserIcon, Sparkles } from "lucide-react";
+import { Send, Bot, User as UserIcon, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -17,6 +17,13 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+
+  const queryClient = useQueryClient();
+
+  const { data: credits } = useQuery({
+    queryKey: ["chat-credits"],
+    queryFn: () => chatApi.credits().then((r) => r.data),
+  });
 
   const chatMut = useMutation({
     mutationFn: (msg: string) => chatApi.send({ message: msg, history: messages.map(m => ({ role: m.role, content: m.content })) }),
@@ -37,6 +44,10 @@ export default function ChatPage() {
         newMsgs[newMsgs.length - 1] = { role: "assistant", content: "Sorry, I ran into an error processing that request." };
         return newMsgs;
       });
+    },
+    onSettled: () => {
+      // Refresh credits after sending a message
+      queryClient.invalidateQueries({ queryKey: ["chat-credits"] });
     }
   });
 
@@ -50,17 +61,40 @@ export default function ChatPage() {
     chatMut.mutate(input);
   };
 
+  const getCreditDisplay = () => {
+    if (!credits) return null;
+    if (credits.is_unlimited) {
+      return { label: "Unlimited", color: "text-amber-400" };
+    }
+    if (credits.remaining <= 10) {
+      return { label: `${credits.remaining} credits left`, color: "text-red-400" };
+    }
+    return { label: `${credits.remaining} credits`, color: "text-emerald-400" };
+  };
+
+  const creditDisplay = getCreditDisplay();
+
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] relative">
       {/* Header */}
-      <div className="flex items-center gap-3 pb-4 border-b border-border shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-purple to-brand-blue flex items-center justify-center shadow-lg">
-          <Sparkles className="w-5 h-5 text-white" />
+      <div className="flex items-center justify-between pb-4 border-b border-border shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-purple to-brand-blue flex items-center justify-center shadow-lg">
+            <Sparkles className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold font-display leading-tight">Career Assistant</h1>
+            <p className="text-xs text-brand-purple-light font-medium">Powered by LLaMA</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-bold font-display leading-tight">Career Assistant</h1>
-          <p className="text-xs text-brand-purple-light font-medium">Powered by LLaMA-70B</p>
-        </div>
+        
+        {/* Credits Display */}
+        {creditDisplay && (
+          <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50", creditDisplay.color)}>
+            <Zap className="w-4 h-4" />
+            <span className="text-sm font-medium">{creditDisplay.label}</span>
+          </div>
+        )}
       </div>
 
       {/* Messages */}

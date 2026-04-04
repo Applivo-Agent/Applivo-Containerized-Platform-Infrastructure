@@ -1,14 +1,15 @@
 """
 app/api/routes/platform.py
-───────────────────────────
+──────────────────────────
 Platform connection API routes.
 Handles cookie management for Internshala (and future platforms).
 """
 
 from __future__ import annotations
 from typing import Union
+import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from pydantic import BaseModel
 
 from app.api.routes.auth import get_current_user
@@ -16,6 +17,11 @@ from app.models.user import User
 from app.services.cookie_service import cookie_service
 
 router = APIRouter(prefix="/platform", tags=["Platform Connection"])
+
+
+class LoginRequest(BaseModel):
+    email: str = ""
+    password: str = ""
 
 
 class SaveCookiesRequest(BaseModel):
@@ -34,6 +40,50 @@ async def platform_status(
     """Get the status of all platform connections for the user."""
     platforms = await cookie_service.list_platforms(current_user.id)
     return {"platforms": platforms}
+
+
+async def _run_internshala_login(user_id: str, email: str, password: str):
+    """Background task to run login - allows longer timeout."""
+    from app.services.internshala_login_service import internshala_login_service
+    await internshala_login_service.login_and_save_cookies(user_id, email, password)
+
+
+@router.post("/login/{platform}")
+async def login_platform(
+    platform: str,
+    data: LoginRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Log into a platform - user manually logs in, we capture cookies.
+    Currently supports: internshala
+    """
+    if platform != "internshala":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Platform '{platform}' login not supported yet. Supported: internshala",
+        )
+    
+    from app.services.internshala_login_service import internshala_login_service
+    
+    result = await internshala_login_service.login_and_save_cookies(
+        user_id=current_user.id,
+        email=data.email,
+        password=data.password,
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("message", "Login failed"),
+        )
+    
+    return {
+        "connected": True,
+        "platform": platform,
+        "message": result.get("message"),
+        "cookies_count": result.get("cookies_count"),
+    }
 
 
 @router.post("/connect")
@@ -56,19 +106,6 @@ async def connect_platform(
         }
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/validate")
-async def validate_platform(
-    data: ValidateCookiesRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """Validate if the platform cookies are still valid."""
-    result = await cookie_service.validate_cookies(
-        user_id=current_user.id,
-        platform=data.platform,
-    )
-    return result
 
 
 @router.delete("/disconnect/{platform}")

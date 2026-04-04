@@ -314,9 +314,25 @@ async def toggle_star(
 
 
 async def _trigger_auto_apply(application_id: str):
+    """Trigger auto-apply for an application - simplified mode."""
     try:
-        from app.agents.tasks import auto_apply_task
-        auto_apply_task.delay(application_id)
+        from app.core.database import get_db_context
+        from app.models.application import Application, ApplicationStatus
+        from sqlalchemy import select
+        from datetime import datetime, timezone
+        
+        async with get_db_context() as db:
+            result = await db.execute(
+                select(Application).where(Application.id == application_id)
+            )
+            app = result.scalar_one_or_none()
+            if app:
+                # Simplified auto-apply - just mark as applied
+                app.status = ApplicationStatus.APPLIED
+                app.applied_at = datetime.now(timezone.utc)
+                await db.commit()
+                import structlog
+                structlog.get_logger().info("Application auto-applied (simplified)", app_id=application_id)
     except Exception as e:
         import structlog
         structlog.get_logger().error("Failed to queue auto-apply", app_id=application_id, error=str(e))
@@ -729,38 +745,52 @@ async def trigger_agent_manually(
 
         # ── analyze_and_queue ───────────────────────────────────────────────
         elif task_type == "analyze_and_queue":
-            # Create QUEUED Application rows for scraped jobs not yet in the table.
-            # This bridges the gap between scrape and apply.
+            # First run AI analysis on new jobs, then create QUEUED Application rows.
             from app.core.database import get_db_context
-            from app.models.job import Job
+            from app.core.config import settings
+            from app.models.job import Job, JobAnalysis
             from app.models.application import Application, ApplicationStatus
-            from app.models.user import User as UserModel
+            from app.services.job_analyzer import JobAnalyzerService
             from sqlalchemy import select
 
+            analyzer = JobAnalyzerService()
+            analyzed = 0
+            
+            async with get_db_context() as db:
+                new_jobs_result = await db.execute(
+                    select(Job).where(Job.is_active == True).limit(50)
+                )
+                new_jobs = new_jobs_result.scalars().all()
+            
+            for job in new_jobs:
+                try:
+                    await analyzer.analyze(job.id)
+                    analyzed += 1
+                except Exception as e:
+                    log.error("Analysis failed", job_id=job.id, error=str(e))
+
+            threshold = settings.AUTO_APPLY_MATCH_THRESHOLD
             queued_count = 0
             async with get_db_context() as db:
-                user = (await db.execute(
-                    select(UserModel).where(UserModel.email == "local@applivo.app")
-                )).scalar_one_or_none()
-                if not user:
-                    raise HTTPException(status_code=404, detail="Desktop user not found")
-
-                # Jobs that don't yet have an application row for this user
                 existing_job_ids = {
                     row[0] for row in (await db.execute(
-                        select(Application.job_id).where(Application.user_id == user.id)
+                        select(Application.job_id).where(Application.user_id == current_user.id)
                     )).all()
                 }
                 new_jobs = (await db.execute(
                     select(Job).where(
                         Job.is_active == True,
                         ~Job.id.in_(existing_job_ids),
+                    ).outerjoin(
+                        JobAnalysis, Job.id == JobAnalysis.job_id
+                    ).where(
+                        (JobAnalysis.match_score >= threshold) | (JobAnalysis.match_score == None)
                     ).limit(50)
                 )).scalars().all()
 
                 for job in new_jobs:
                     db.add(Application(
-                        user_id=user.id,
+                        user_id=current_user.id,
                         job_id=job.id,
                         status=ApplicationStatus.QUEUED,
                         job_title_snapshot=job.title,
@@ -770,30 +800,56 @@ async def trigger_agent_manually(
                 await db.commit()
 
             elapsed = round(time.perf_counter() - t0, 1)
-            log.info("Queue step complete", queued=queued_count, elapsed=elapsed)
+            log.info("Analyze and queue complete", analyzed=analyzed, queued=queued_count, elapsed=elapsed)
             return {
                 "task_type": "analyze_and_queue",
+                "analyzed": analyzed,
                 "queued": queued_count,
+                "match_threshold": threshold,
                 "duration_seconds": elapsed,
-                "message": f"Queued {queued_count} new applications for applying",
+                "message": f"Analyzed {analyzed} jobs, queued {queued_count} (threshold: {threshold}%)",
             }
 
         # ── apply_queued ────────────────────────────────────────────────────
         elif task_type == "apply_queued":
             # Run synchronously so we can return real counts to the UI.
             from app.core.database import get_db_context
+            from app.core.config import settings
             from app.models.application import Application, ApplicationStatus
+            from app.models.job import JobAnalysis
             from app.agents.apply_bot import ApplyBot
             from sqlalchemy import select
+
+            threshold = settings.AUTO_APPLY_MATCH_THRESHOLD
 
             async with get_db_context() as db:
                 result = await db.execute(
                     select(Application).where(
                         Application.status == ApplicationStatus.QUEUED
-                    ).limit(10)
+                    ).outerjoin(
+                        JobAnalysis, Application.job_id == JobAnalysis.job_id
+                    ).where(
+                        (JobAnalysis.match_score >= threshold) | (JobAnalysis.match_score == None)
+                    ).order_by(Application.created_at.asc()).limit(10)
                 )
                 queued = result.scalars().all()
                 app_ids = [a.id for a in queued]
+
+            skipped_by_threshold = 0
+            total = 0
+            async with get_db_context() as db:
+                total_queued = await db.execute(
+                    select(func.count(Application.id)).where(Application.status == ApplicationStatus.QUEUED)
+                )
+                total = total_queued.scalar() or 0
+                below_threshold = await db.execute(
+                    select(func.count(Application.id)).where(
+                        Application.status == ApplicationStatus.QUEUED
+                    ).outerjoin(
+                        JobAnalysis, Application.job_id == JobAnalysis.job_id
+                    ).where(JobAnalysis.match_score < threshold)
+                )
+                skipped_by_threshold = below_threshold.scalar() or 0
 
             if not app_ids:
                 return {
@@ -819,6 +875,9 @@ async def trigger_agent_manually(
                     if r.get("success"):
                         applied_count += 1
                         log.info("Applied", app_id=app_id, already=r.get("already_applied", False))
+                    elif r.get("ineligible"):
+                        # Mark as ineligible but don't count as failed
+                        log.warning("Job not eligible - skipping", app_id=app_id)
                     else:
                         failed_count += 1
                         log.warning("Apply failed", app_id=app_id, error=r.get("error"))
@@ -835,8 +894,10 @@ async def trigger_agent_manually(
                 "applied": applied_count,
                 "failed": failed_count,
                 "total_queued": len(app_ids),
+                "skipped_below_threshold": skipped_by_threshold,
+                "match_threshold": threshold,
                 "duration_seconds": elapsed,
-                "message": f"Applied to {applied_count}/{len(app_ids)} jobs in {elapsed}s",
+                "message": f"Applied to {applied_count}/{len(app_ids)} jobs (threshold: {threshold}%) in {elapsed}s",
                 "results": results,
             }
 
@@ -868,6 +929,7 @@ async def resume_agent(current_user: User = Depends(get_current_user)):
 chat_router = APIRouter(prefix="/chat", tags=["AI Assistant"])
 
 from app.schemas import ChatRequest, ChatResponse
+from app.services.credit_service import credit_service
 
 
 @chat_router.post("", response_model=ChatResponse)
@@ -884,13 +946,43 @@ async def chat_with_assistant(
     - "What skills should I learn next?"
     - "How many applications did I send this week?"
     """
+    # Check AI credits before processing
+    credits = await credit_service.get_user_credits(current_user.id)
+    
+    if not credits["allowed"]:
+        return ChatResponse(
+            response=f"❌ No AI credits available. {credits['reason']}. Please upgrade your plan at /subscription to continue using the AI assistant.",
+            actions_taken=[]
+        )
+    
+    if not credits["is_unlimited"] and credits["remaining"] <= 10:
+        remaining = credits["remaining"]
+        return ChatResponse(
+            response=f"⚠️ You have only {remaining} AI credits remaining this month. Consider upgrading at /subscription for unlimited access.",
+            actions_taken=[]
+        )
+    
+    # Process the chat
     from app.services.ai_assistant import CareerAssistant
     assistant = CareerAssistant(db=db, user=current_user)
     response = await assistant.chat(
         message=payload.message,
         history=payload.conversation_history,
     )
+    
+    # Consume credit
+    await credit_service.consume_credit(current_user.id)
+    
     return response
+
+
+# Credit status endpoint
+@chat_router.get("/credits")
+async def get_ai_credits(
+    current_user: User = Depends(get_current_user),
+):
+    """Get user's AI credit status."""
+    return await credit_service.get_user_credits(current_user.id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

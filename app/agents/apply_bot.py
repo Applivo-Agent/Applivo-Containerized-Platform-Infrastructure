@@ -438,7 +438,7 @@ class ApplyBot:
                     logger.info("Detected ATS", ats=ats, url=job.source_url)
 
                     if ats == "internshala":
-                        result = await apply_internshala(page, job, profile, resume, settings)
+                        result = await apply_internshala(page, job, profile, resume, settings, user_id=app.user_id)
                     elif ats == "linkedin":
                         result = await self._apply_linkedin(page, job, profile, resume)
                     elif ats == "greenhouse":
@@ -458,6 +458,10 @@ class ApplyBot:
 
                 except Exception as e:
                     error_str = str(e)
+                    # Check for the coroutine issue specifically
+                    if "coroutine" in error_str and "lower" in error_str:
+                        import traceback
+                        logger.error("Coroutine error in apply_bot", traceback=traceback.format_exc())
                     is_captcha = any(w in error_str.lower() for w in ["captcha", "recaptcha", "verify you are human"])
                     return {
                         "success": False,

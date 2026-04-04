@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     OPENAI_API_KEY: str = ""      # Legacy field — use GROQ_API_KEY instead
     GROQ_API_KEY: str = ""         # Groq API key (gsk_...) — used for all AI calls
-    OPENAI_MODEL_HEAVY: str = "llama3-70b-8192"
-    OPENAI_MODEL_LIGHT: str = "llama3-8b-8192"
+    OPENAI_MODEL_HEAVY: str = "llama-3.3-70b-versatile"
+    OPENAI_MODEL_LIGHT: str = "llama-3.1-8b-instant"
 
     @property
     def ai_api_key(self) -> str:
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     INDEED_EMAIL: str = ""
     INDEED_PASSWORD: str = ""
     AUTO_APPLY_ENABLED: bool = False
-    AUTO_APPLY_MATCH_THRESHOLD: int = 75
+    AUTO_APPLY_MATCH_THRESHOLD: int = 40
     AUTO_APPLY_DAILY_LIMIT: int = 10
     AUTO_APPLY_REQUIRE_APPROVAL: bool = True
     USER_NAME: str = ""
