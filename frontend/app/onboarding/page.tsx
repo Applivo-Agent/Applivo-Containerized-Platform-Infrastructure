@@ -120,9 +120,7 @@ export default function OnboardingPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-purple to-brand-blue flex items-center justify-center">
-              <Zap className="w-4 h-4 text-white" />
-            </div>
+            <img src="/logo.svg" alt="Applivo" className="w-8 h-8" />
             <span className="text-xl font-bold font-display gradient-text">Applivo</span>
           </div>
           <h1 className="text-2xl font-bold mb-1">Set up your profile</h1>
