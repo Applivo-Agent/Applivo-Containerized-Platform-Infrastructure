@@ -1138,17 +1138,20 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
         "you do not meet the eligibility criteria",
         "not_eligible_banner",
         "eligibility-criteria-not-met",
+        "not eligible",
     )):
-        logger.warning("Eligibility warning found in page HTML - will still attempt apply")
-        # Don't return here - try to apply anyway
-    # Check for eligibility banner element - but don't block, just log it
+        logger.warning("Not eligible text found in page HTML - marking as ineligible")
+        return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+    
+    # Check for eligibility banner element
     eligibility_banner = await page.query_selector(
         ".not-eligible, .ineligible, [class*='not-eligible'], [class*='ineligible']"
     )
     if eligibility_banner and await eligibility_banner.is_visible():
         banner_text = (await eligibility_banner.inner_text()) or ""
-        logger.warning("Eligibility banner found - will still attempt apply", text=banner_text[:200])
-        # Don't return here - try to apply anyway
+        logger.warning("Eligibility banner found - marking as ineligible", text=banner_text[:200])
+        return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+    
     if any(x in html_check for x in (
         "hiring closed", "no longer accepting", "internship closed", "applications closed"
     )):
@@ -1235,23 +1238,19 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
         logger.info("Already applied to this internship")
         return {"success": True, "already_applied": True, "ats": "internshala", "verified": True}
     
-    # Even if button shows "not eligible" or disabled, try clicking anyway
-    # (sometimes Internshala enables it after profile update, or it's just a UI glitch)
-    logger.info("Processing apply button", has_not_eligible="not eligible" in btn_text, is_disabled=is_disabled is not None)
-    if "not eligible" in btn_text or is_disabled is not None:
-        logger.warning("Button shows disabled/not eligible - attempting click anyway", text=btn_text[:100])
+    # Check if button shows "not eligible" - return ineligible immediately
+    if "not eligible" in btn_text:
+        logger.warning("Button shows 'not eligible' - marking as ineligible immediately")
+        return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+    
+    # Check if button is disabled but not "not eligible" - still try to click
+    if is_disabled is not None:
+        logger.warning("Button is disabled but not showing 'not eligible' - will attempt click anyway")
         btn_was_disabled = True
     else:
         btn_was_disabled = False
 
     # Skip waiting loop for disabled buttons - go directly to click attempt
-    if btn_was_disabled:
-        logger.info("Skipping wait loop - going directly to click attempt")
-
-    # Skip waiting loop for disabled buttons - go directly to JS click attempt
-    if btn_was_disabled:
-        logger.info("Skipping wait loop - going directly to click attempt")
-    else:
         # Try to scroll button into view and wait for it to be enabled
         try:
             await apply_btn.scroll_into_view_if_needed()

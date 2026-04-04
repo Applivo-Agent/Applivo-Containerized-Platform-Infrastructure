@@ -46,6 +46,7 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"                 # User withdrew application
     FAILED = "failed"                       # Bot failed to apply
+    SKIPPED = "skipped"                     # Bot skipped (not eligible)
 
 
 class ApplicationMethod(str, enum.Enum):

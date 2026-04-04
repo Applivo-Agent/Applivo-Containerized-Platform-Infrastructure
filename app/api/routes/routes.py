@@ -772,9 +772,13 @@ async def trigger_agent_manually(
             threshold = settings.AUTO_APPLY_MATCH_THRESHOLD
             queued_count = 0
             async with get_db_context() as db:
+                # Get existing job IDs from applications (excluding SKIPPED so we can re-queue those if they become eligible - but for now exclude all existing)
                 existing_job_ids = {
                     row[0] for row in (await db.execute(
-                        select(Application.job_id).where(Application.user_id == current_user.id)
+                        select(Application.job_id).where(
+                            Application.user_id == current_user.id,
+                            Application.status != ApplicationStatus.SKIPPED  # Don't re-queue failed/skipped - only re-queue APPLIED/QUEUED/FAILED
+                        )
                     )).all()
                 }
                 new_jobs = (await db.execute(
@@ -867,6 +871,7 @@ async def trigger_agent_manually(
             bot = ApplyBot()
             applied_count = 0
             failed_count = 0
+            skipped_count = 0
             results = []
 
             for app_id in app_ids:
@@ -876,8 +881,15 @@ async def trigger_agent_manually(
                         applied_count += 1
                         log.info("Applied", app_id=app_id, already=r.get("already_applied", False))
                     elif r.get("ineligible"):
-                        # Mark as ineligible but don't count as failed
-                        log.warning("Job not eligible - skipping", app_id=app_id)
+                        # Mark as SKIPPED so it won't be retried
+                        skipped_count += 1
+                        async with get_db_context() as db:
+                            app = await db.get(Application, app_id)
+                            if app:
+                                app.status = ApplicationStatus.SKIPPED
+                                app.bot_error = r.get("error", "Not eligible")
+                                await db.commit()
+                        log.warning("Job not eligible - marked as SKIPPED", app_id=app_id)
                     else:
                         failed_count += 1
                         log.warning("Apply failed", app_id=app_id, error=r.get("error"))
@@ -893,11 +905,12 @@ async def trigger_agent_manually(
                 "task_type": "apply_queued",
                 "applied": applied_count,
                 "failed": failed_count,
+                "skipped": skipped_count,
                 "total_queued": len(app_ids),
                 "skipped_below_threshold": skipped_by_threshold,
                 "match_threshold": threshold,
                 "duration_seconds": elapsed,
-                "message": f"Applied to {applied_count}/{len(app_ids)} jobs (threshold: {threshold}%) in {elapsed}s",
+                "message": f"Applied to {applied_count}/{len(app_ids)} jobs (skipped: {skipped_count}, threshold: {threshold}%) in {elapsed}s",
                 "results": results,
             }
 
