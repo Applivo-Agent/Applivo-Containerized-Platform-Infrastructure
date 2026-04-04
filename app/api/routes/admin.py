@@ -699,3 +699,72 @@ async def get_platform_settings(
             "cover_letter_generation": True,
         },
     }
+
+
+@admin_router.get("/queue/status")
+async def get_queue_status(
+    admin: User = Depends(require_admin),
+):
+    """Get Celery queue status."""
+    from app.core.celery_app import celery_app
+    
+    try:
+        inspect = celery_app.control.inspect()
+        stats = inspect.stats()
+        active = inspect.active()
+        reserved = inspect.reserved()
+        
+        queues = {
+            "default": len(reserved.get("celery@*", [])) if reserved else 0,
+            "scraping": 0,
+            "analysis": 0,
+            "apply": 0,
+        }
+        
+        return {
+            "default": 0,
+            "scraping": 0,
+            "analysis": 0,
+            "apply": 0,
+            "workers": list(stats.keys()) if stats else [],
+            "active_tasks": sum(len(v) for v in active.values()) if active else 0,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@admin_router.post("/system/{action}")
+async def system_action(
+    action: str,
+    admin: User = Depends(require_admin),
+):
+    """Execute system actions: run-scraper, clear-queue, restart-worker."""
+    import structlog
+    log = structlog.get_logger()
+    
+    if action == "run-scraper":
+        from app.agents.scrapers.internshala import InternshalaScraper
+        scraper = InternshalaScraper()
+        try:
+            jobs = await scraper.run()
+            return {"success": True, "message": f"Scraped {jobs} jobs"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    elif action == "clear-queue":
+        try:
+            from app.core.celery_app import celery_app
+            celery_app.control.purge()
+            return {"success": True, "message": "Queue cleared"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    elif action == "restart-worker":
+        try:
+            from app.core.celery_app import celery_app
+            celery_app.control.broadcast("shutdown", destination=["celery@*"])
+            return {"success": True, "message": "Worker restart signal sent"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    return {"success": False, "error": "Unknown action"}
