@@ -189,3 +189,21 @@ export const adminApi = {
   auditLogs: (params?: Record<string, unknown>) =>
     api.get("/admin/audit-logs", { params }),
 };
+
+// ─── Scheduler ───────────────────────────────────────────────────────────
+export const schedulerApi = {
+  listJobs: () => api.get("/scheduler/jobs"),
+  addJob: (data: Record<string, unknown>) => api.post("/scheduler/jobs", data),
+  removeJob: (jobId: string) => api.delete(`/scheduler/jobs/${jobId}`),
+  runJobNow: (jobId: string) => api.post(`/scheduler/jobs/${jobId}/run`),
+  pauseJob: (jobId: string) => api.post(`/scheduler/jobs/${jobId}/pause`),
+  resumeJob: (jobId: string) => api.post(`/scheduler/jobs/${jobId}/resume`),
+  triggerTask: (taskName: string) => api.post(`/scheduler/trigger/${taskName}`),
+  toggleJob: async (jobId: string, enabled: boolean) => {
+    if (enabled) {
+      return api.post(`/scheduler/jobs/${jobId}/resume`);
+    } else {
+      return api.post(`/scheduler/jobs/${jobId}/pause`);
+    }
+  },
+};

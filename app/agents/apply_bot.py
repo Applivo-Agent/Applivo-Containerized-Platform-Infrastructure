@@ -128,9 +128,9 @@ class ApplyBot:
                             jobs_result = await db.execute(
                                 select(Job).where(Job.is_active == True).limit(1)
                             )
-                            job = jobs_result.scalar_one_or_none()
-                            if job:
-                                result = await resume_service.generate_tailored(app.user_id, job.id)
+                            resume_gen_job = jobs_result.scalar_one_or_none()
+                            if resume_gen_job:
+                                result = await resume_service.generate_tailored(app.user_id, resume_gen_job.id)
                                 # Load the generated resume
                                 resume = (await db.execute(
                                     select(Resume).where(Resume.id == result['resume_id'])
@@ -354,6 +354,47 @@ class ApplyBot:
                     body=f"The application bot hit a CAPTCHA on {job.company_name if job else 'company'}. Please apply manually.\n\n{job.source_url if job else ''}",
                     event_type="captcha_detected",
                 )
+            elif result.get("ineligible"):
+                # Mark as SKIPPED instead of FAILED to prevent retrying ineligible jobs
+                app_record.status = ApplicationStatus.SKIPPED
+                app_record.bot_error = result.get("error", "Not eligible")
+                db.add(ApplicationEvent(
+                    application_id=application_id,
+                    event_type="ineligible",
+                    from_status=ApplicationStatus.APPLYING,
+                    to_status=ApplicationStatus.SKIPPED,
+                    triggered_by="agent",
+                    details={"reason": result.get("error")},
+                ))
+                logger.info("Job marked as skipped due to ineligibility", app_id=application_id, reason=result.get("error"))
+            elif result.get("error") and "invalid job" in result.get("error", "").lower():
+                # Job posting is closed or invalid - mark as FAILED (not SKIPPED, but don't retry)
+                app_record.status = ApplicationStatus.FAILED
+                app_record.bot_error = result.get("error", "Invalid Job")
+                app_record.retry_count = 999  # Prevent retries
+                db.add(ApplicationEvent(
+                    application_id=application_id,
+                    event_type="invalid_job",
+                    from_status=ApplicationStatus.APPLYING,
+                    to_status=ApplicationStatus.FAILED,
+                    triggered_by="agent",
+                    details={"reason": result.get("error")},
+                ))
+                logger.warning("Job marked as failed - invalid/closed posting", app_id=application_id, reason=result.get("error"))
+            elif result.get("error") and "external" in result.get("error", "").lower():
+                # External job posting - mark as FAILED so it doesn't retry
+                app_record.status = ApplicationStatus.FAILED
+                app_record.bot_error = result.get("error", "External posting")
+                app_record.retry_count = 999  # Prevent retries
+                db.add(ApplicationEvent(
+                    application_id=application_id,
+                    event_type="external_job",
+                    from_status=ApplicationStatus.APPLYING,
+                    to_status=ApplicationStatus.FAILED,
+                    triggered_by="agent",
+                    details={"reason": result.get("error")},
+                ))
+                logger.warning("External job - marked as failed", app_id=application_id, reason=result.get("error"))
             else:
                 app_record.status = ApplicationStatus.FAILED
                 app_record.bot_error = result.get("error", "Unknown error")

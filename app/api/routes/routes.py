@@ -313,8 +313,35 @@ async def toggle_star(
     return app
 
 
+@applications_router.post("/{app_id}/apply-now", response_model=MessageResponse)
+async def apply_now(
+    app_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Trigger immediate auto-apply for a single application."""
+    result = await db.execute(
+        select(Application).where(Application.id == app_id, Application.user_id == current_user.id)
+    )
+    app = result.scalar_one_or_none()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    if app.status == ApplicationStatus.APPLIED:
+        raise HTTPException(status_code=400, detail="Already applied to this job")
+    
+    if app.status == ApplicationStatus.APPLYING:
+        raise HTTPException(status_code=400, detail="Application is already being processed")
+    
+    # Trigger the bot to apply
+    background_tasks.add_task(_trigger_auto_apply, app.id)
+    
+    return MessageResponse(message="Application process started")
+
+
 async def _trigger_auto_apply(application_id: str):
-    """Trigger auto-apply for an application - simplified mode."""
+    """Trigger auto-apply for an application - uses actual bot."""
     try:
         from app.core.database import get_db_context
         from app.models.application import Application, ApplicationStatus
@@ -327,15 +354,16 @@ async def _trigger_auto_apply(application_id: str):
             )
             app = result.scalar_one_or_none()
             if app:
-                # Simplified auto-apply - just mark as applied
-                app.status = ApplicationStatus.APPLIED
-                app.applied_at = datetime.now(timezone.utc)
-                await db.commit()
+                # Use the actual bot instead of just marking as applied
+                from app.agents.apply_bot import ApplyBot
+                bot = ApplyBot()
+                result = await bot.apply(application_id)
+                
                 import structlog
-                structlog.get_logger().info("Application auto-applied (simplified)", app_id=application_id)
+                structlog.get_logger().info("Application auto-applied via bot", app_id=application_id, result=result)
     except Exception as e:
         import structlog
-        structlog.get_logger().error("Failed to queue auto-apply", app_id=application_id, error=str(e))
+        structlog.get_logger().error("Failed to auto-apply via bot", app_id=application_id, error=str(e))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -399,7 +427,7 @@ async def upload_resume(
     return resume
 
 
-@resumes_router.post("/generate", response_model=ResumeOut, status_code=201)
+@resumes_router.post("/generate", response_model=MessageResponse, status_code=202)
 async def generate_tailored_resume(
     payload: ResumeGenerateRequest,
     background_tasks: BackgroundTasks,
@@ -872,14 +900,26 @@ async def trigger_agent_manually(
             applied_count = 0
             failed_count = 0
             skipped_count = 0
+            already_applied_count = 0
             results = []
 
             for app_id in app_ids:
                 try:
                     r = await bot.apply(app_id)
                     if r.get("success"):
-                        applied_count += 1
-                        log.info("Applied", app_id=app_id, already=r.get("already_applied", False))
+                        if r.get("already_applied"):
+                            # Already applied externally - sync status
+                            already_applied_count += 1
+                            async with get_db_context() as db:
+                                app = await db.get(Application, app_id)
+                                if app:
+                                    app.status = ApplicationStatus.APPLIED
+                                    app.applied_at = datetime.now(timezone.utc)
+                                    await db.commit()
+                            log.info("Already applied - synced", app_id=app_id)
+                        else:
+                            applied_count += 1
+                            log.info("Applied", app_id=app_id)
                     elif r.get("ineligible"):
                         # Mark as SKIPPED so it won't be retried
                         skipped_count += 1
@@ -890,6 +930,17 @@ async def trigger_agent_manually(
                                 app.bot_error = r.get("error", "Not eligible")
                                 await db.commit()
                         log.warning("Job not eligible - marked as SKIPPED", app_id=app_id)
+                    elif r.get("error") and "external" in r.get("error", "").lower():
+                        # External job posting - mark as FAILED so it won't retry
+                        failed_count += 1
+                        async with get_db_context() as db:
+                            app = await db.get(Application, app_id)
+                            if app:
+                                app.status = ApplicationStatus.FAILED
+                                app.bot_error = r.get("error", "External posting")
+                                app.retry_count = 999
+                                await db.commit()
+                        log.warning("External job - marked as FAILED", app_id=app_id)
                     else:
                         failed_count += 1
                         log.warning("Apply failed", app_id=app_id, error=r.get("error"))

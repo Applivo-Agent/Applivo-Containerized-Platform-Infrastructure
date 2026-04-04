@@ -84,6 +84,11 @@ class SchedulerService:
             self._setup_scheduler()
         return self._scheduler
     
+    def ensure_started(self):
+        """Ensure scheduler is running (called from main.py)."""
+        if not self._scheduler.running:
+            self.start()
+    
     def start(self):
         """Start the scheduler."""
         if not self.scheduler.running:

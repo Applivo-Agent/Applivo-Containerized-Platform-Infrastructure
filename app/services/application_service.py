@@ -142,16 +142,26 @@ class ApplicationService:
 
                 if not profile.require_apply_approval:
                     await db.flush()
-                    # Run auto-apply (simplified - marks as applied, full Playwright bot needs setup)
+                    # Run full auto-apply using the bot
                     try:
-                        # For now, just mark as applied - Playwright needs installation
-                        app.status = ApplicationStatus.APPLIED
-                        app.applied_at = datetime.now(timezone.utc)
-                        logger.info("Application auto-applied (simplified mode)", app_id=app.id, job_title=job.title)
+                        from app.agents.apply_bot import ApplyBot
+                        bot = ApplyBot()
+                        result = await bot.apply(app.id)
+
+                        # The bot updates the app status directly, so reload it
+                        await db.refresh(app)
+
+                        if app.status == ApplicationStatus.APPLIED:
+                            logger.info("Application auto-applied successfully", app_id=app.id, job_title=job.title)
+                        elif app.status == ApplicationStatus.SKIPPED:
+                            logger.info("Application ineligible - marked as skipped", app_id=app.id, reason=app.bot_error)
+                        else:
+                            logger.error("Auto-apply failed", app_id=app.id, error=app.bot_error)
+
                     except Exception as e:
                         logger.error("Auto-apply failed", app_id=app.id, error=str(e))
                         app.status = ApplicationStatus.FAILED
-                        app.failure_reason = str(e)
+                        app.bot_error = str(e)
 
             except Exception as e:
                 logger.error("Failed to queue application", user_id=user.id, job_id=job.id, error=str(e))

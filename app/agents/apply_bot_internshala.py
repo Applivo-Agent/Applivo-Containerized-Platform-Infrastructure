@@ -216,6 +216,12 @@ async def _wait_for_captcha_resolution(page, timeout_s: int = 120) -> bool:
 
 async def _is_logged_in(page) -> bool:
     try:
+        # First check URL - most reliable indicator
+        url = page.url
+        if "/student/" in url and "/login" not in url:
+            print("DEBUG: _is_logged_in found /student/ in URL")
+            return True
+        
         # Check for multiple logged-in indicators
         selectors = [
             ".profile-header", "#header-profile-img",
@@ -233,6 +239,7 @@ async def _is_logged_in(page) -> bool:
             try:
                 el = await page.query_selector(sel)
                 if el:
+                    print(f"DEBUG: _is_logged_in found: {sel}")
                     return True
             except Exception:
                 continue
@@ -240,12 +247,16 @@ async def _is_logged_in(page) -> bool:
         # Also check page content for logged-in indicators
         content = await page.content()
         if "logout" in content.lower() or "sign out" in content.lower():
+            print("DEBUG: _is_logged_in found 'logout' in content")
             return True
-        if "/student/" in content and "login" not in page.url:
+        if "/student/" in content:
+            print("DEBUG: _is_logged_in found /student/ in content")
             return True
             
+        print("DEBUG: _is_logged_in returning False")
         return False
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: _is_logged_in exception: {e}")
         return False
 
 
@@ -294,16 +305,43 @@ async def _dismiss_blocking_modals_only(page) -> None:
                     var el = document.getElementById(id);
                     if (el) el.remove();
                 });
-                var hasAppForm = document.querySelector(
-                    '#application_form, .application-modal, form[id*="apply"]'
-                );
-                if (!hasAppForm) {
-                    document.querySelectorAll('.modal-backdrop').forEach(function(el) {
+                
+                // Remove modal backdrops first
+                document.querySelectorAll('.modal-backdrop.show').forEach(function(el) {
+                    el.remove();
+                });
+                
+                // Handle generic aria-modal dialogs (including "One time offer" signup modals)
+                document.querySelectorAll('[role="dialog"][aria-modal="true"]').forEach(function(dialog) {
+                    // Check if it's a signup/offer modal (don't close if it's the application form)
+                    var text = (dialog.innerText || '').toLowerCase();
+                    var isSignupModal = text.includes('sign up') || text.includes('one time offer') || text.includes('free ai career');
+                    
+                    if (isSignupModal) {
+                        // Try to close it first
+                        var closeBtn = dialog.querySelector('[aria-label="Close"], .close, .modal-close, button[class*="close"], .signup-modal-close');
+                        if (closeBtn) {
+                            closeBtn.click();
+                        }
+                        // If not closed, remove it
+                        setTimeout(() => dialog.remove(), 500);
+                    }
+                });
+                
+                // Also remove any visible signup/offer modals by selector
+                document.querySelectorAll('.modal.show, [class*="signup-modal"]:not(form), [class*="offer-modal"]:not(form)').forEach(function(el) {
+                    var text = (el.innerText || '').toLowerCase();
+                    if (text.includes('sign up') || text.includes('one time offer')) {
                         el.remove();
-                    });
-                    document.body.classList.remove('modal-open');
-                    document.body.style.overflow = 'auto';
-                }
+                    }
+                });
+                
+                // Always remove modal backdrops
+                document.querySelectorAll('.modal-backdrop').forEach(function(el) {
+                    el.remove();
+                });
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = 'auto';
             }
         """)
         await asyncio.sleep(0.3)
@@ -842,6 +880,17 @@ async def _check_submission_result(page) ->Optional[dict]:
     html = (await page.content()).lower()
     url = page.url
     logger.info("Checking submission result", url=url)
+    
+    # FIRST: Check for error modal - if present, it's definitely NOT success
+    modal = await page.query_selector('.modal.show')
+    if modal:
+        modal_text = (await modal.inner_text() or "").lower()
+        if "invalid job" in modal_text:
+            logger.warning("Invalid Job error detected")
+            return {"success": False, "error": "Invalid Job - posting may be closed"}
+        if "error" in modal_text or "failed" in modal_text:
+            logger.warning("Error modal detected", text=modal_text[:100])
+            return {"success": False, "error": f"Application failed: {modal_text[:50]}"}
 
     # 1. Success text anywhere on the page
     for sig in _SUCCESS_SIGNALS:
@@ -1033,7 +1082,7 @@ async def _fill_application_form(
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def apply_internshala(page, job, profile, resume, settings_obj, user_id: str = None) -> dict:
+async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None) -> dict:
     context = page.context
 
     # First try to load from file (legacy)
@@ -1098,6 +1147,39 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
     logger.info("Loading detail page", url=job.source_url)
     await page.goto(job.source_url, wait_until="networkidle", timeout=45000)
 
+    await asyncio.sleep(2)
+    
+    # First check if we got an error/crashed page instead of job content
+    raw_html = await page.content()
+    raw_lower = raw_html.lower()
+    print(f"DEBUG: raw_html length: {len(raw_html)}")
+    
+    # Check for error/crashed/bot detection pages
+    error_indicators = [
+        "access denied", "blocked", "suspicious activity",
+        "rate limit", "too many requests", "captcha",
+        "verify you are human", "cloudflare", 
+        "something went wrong", "server error", "500",
+        "we're sorry", "page not found", "404"
+    ]
+    
+    # Check for employer blocked modal specifically - employer has closed applications
+    if "employer_blocked_error_modal" in raw_lower:
+        print("DEBUG: Found employer_blocked_error_modal")
+        blocked_modal = await page.query_selector("#employer_blocked_error_modal")
+        if blocked_modal:
+            is_visible = await blocked_modal.is_visible()
+            print(f"DEBUG: blocked_modal visible: {is_visible}")
+            if is_visible:
+                modal_text = await blocked_modal.inner_text()
+                print(f"DEBUG: Blocked modal text: {modal_text[:200]}")
+                return {"success": False, "error": "Employer has closed applications for this internship"}
+    
+    # Check for rate limiting
+    if "too many requests" in raw_lower:
+        logger.warning("Detected rate limiting")
+        return {"success": False, "error": "Internshala rate limiting - try again later"}
+
     try:
         await page.wait_for_selector(
             ".internship_details, #internship_detail_container, "
@@ -1129,28 +1211,43 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
         }
 
     html_check = (await page.content()).lower()
-    # Don't return early on eligibility check - continue and try to click anyway
-    # Sometimes the banner is shown but applying still works after profile update
-    # Only log it but don't block the attempt
-    if any(x in html_check for x in (
+    print(f"DEBUG: html_check length: {len(html_check)}")
+    print(f"DEBUG: html_check contains 'not eligible': {'not eligible' in html_check}")
+    
+    # Check for explicit eligibility rejection - look for specific banner/text
+    # The message "As your Internshala resume lists X as your location, you are not eligible" is the key indicator
+    eligibility_rejection_patterns = [
+        "as your internshala resume lists",
         "you are not eligible for this internship",
-        "you're not eligible",
-        "you do not meet the eligibility criteria",
-        "not_eligible_banner",
-        "eligibility-criteria-not-met",
-        "not eligible",
-    )):
-        logger.warning("Not eligible text found in page HTML - marking as ineligible")
-        return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+        "you're not eligible for this internship",
+        "you do not meet the eligibility criteria for this internship",
+    ]
+    
+    # Check if there's a visible rejection message in the eligibility section
+    try:
+        who_can_apply = await page.query_selector('.who_can_apply, .eligibility-section, [class*="who_can"]')
+        if who_can_apply:
+            section_text = (await who_can_apply.inner_text() or "").lower()
+            print(f"DEBUG: who_can_apply section found, contains 'not eligible': {'not eligible' in section_text}")
+            if "as your internshala resume lists" in section_text:
+                print("DEBUG: Location-based ineligibility detected")
+                return {"success": False, "ineligible": True, "error": "Not eligible - profile location does not match job requirements"}
+    except Exception as e:
+        print(f"DEBUG: Error checking eligibility section: {e}")
     
     # Check for eligibility banner element
     eligibility_banner = await page.query_selector(
         ".not-eligible, .ineligible, [class*='not-eligible'], [class*='ineligible']"
     )
-    if eligibility_banner and await eligibility_banner.is_visible():
-        banner_text = (await eligibility_banner.inner_text()) or ""
-        logger.warning("Eligibility banner found - marking as ineligible", text=banner_text[:200])
-        return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+    print(f"DEBUG: eligibility_banner found: {eligibility_banner is not None}")
+    if eligibility_banner:
+        is_visible = await eligibility_banner.is_visible()
+        print(f"DEBUG: eligibility_banner visible: {is_visible}")
+        if is_visible:
+            banner_text = await eligibility_banner.inner_text() or ""
+            print(f"DEBUG: banner_text: {banner_text[:100]}")
+            logger.warning("Eligibility banner found - marking as ineligible", text=banner_text[:200])
+            return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
     
     if any(x in html_check for x in (
         "hiring closed", "no longer accepting", "internship closed", "applications closed"
@@ -1233,15 +1330,44 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
     
     logger.info("Checking apply button state", text=btn_text[:100], has_disabled_attr=is_disabled is not None)
     
-    # Check for "already applied" first (highest priority)
+    # DEBUG: Log the full button HTML for analysis
+    btn_html = (await apply_btn.evaluate("function(el) { return el.outerHTML; }")) or ""
+    logger.info("Apply button HTML", html=btn_html[:500])
+    
+    # FIRST: Check if already applied anywhere on the page (not just button)
+    page_content = (await page.content()).lower()
+    if "already applied" in page_content:
+        logger.info("Already applied to this internship (found in page content)")
+        return {"success": True, "already_applied": True, "ats": "internshala", "verified": True}
+    
+    # Check for "already applied" on button text
     if "already applied" in btn_text or "applied" in btn_text:
         logger.info("Already applied to this internship")
         return {"success": True, "already_applied": True, "ats": "internshala", "verified": True}
     
     # Check if button shows "not eligible" - return ineligible immediately
-    if "not eligible" in btn_text:
+    btn_text_lower = btn_text.lower()
+    print(f"DEBUG: Button text = '{btn_text}'")
+    print(f"DEBUG: Button disabled = {is_disabled}")
+    print(f"DEBUG: 'not eligible' in btn_text = {'not eligible' in btn_text_lower}")
+    
+    # Check ALL possible places that could return ineligible
+    # First check the button text
+    if "not eligible" in btn_text_lower:
+        print("DEBUG: Returning ineligible from button text check")
         logger.warning("Button shows 'not eligible' - marking as ineligible immediately")
         return {"success": False, "ineligible": True, "error": "Not eligible - Internshala profile requirements not met"}
+    
+    # Check for other blocked states - button might show different text when disabled
+    blocked_phrases = ["sign in to apply", "login to apply", "register to apply"]
+    if any(phrase in btn_text for phrase in blocked_phrases):
+        logger.warning("Button shows login required - checking session")
+        # Try to see if this is a login wall - reload and check
+        await page.reload(wait_until="networkidle")
+        await asyncio.sleep(2)
+        if await _is_on_login_wall(page):
+            return {"success": False, "error": "Session expired. Run save_cookies.py."}
+        return {"success": False, "ineligible": True, "error": "Login required to apply"}
     
     # Check if button is disabled but not "not eligible" - still try to click
     if is_disabled is not None:
@@ -1285,6 +1411,12 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: s
 
     href = await apply_btn.get_attribute("href") or ""
     logger.info("Apply button", href=href)
+
+    # Check for external redirect URLs - these are NOT Internshala applications
+    external_domains = ["appcast.io", ".applytojob", "careerbliss", "indeed", "linkedin", "glassdoor", "naukri", "monster"]
+    if href and any(domain in href.lower() for domain in external_domains):
+        logger.warning("External application URL detected - skipping", url=href)
+        return {"success": False, "error": "External job posting - requires manual application", "external": True}
 
     if href and href not in ("#", "") and "javascript" not in href:
         full_url = href if href.startswith("http") else f"https://internshala.com{href}"

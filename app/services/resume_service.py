@@ -125,6 +125,13 @@ class ResumeService:
                 if not content or content.startswith("% Error"):
                     logger.warning("Resume generation returned empty or error", content=content)
                     raise ValueError("LLM returned empty response")
+                # Strip markdown code blocks if present
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("```")[1]
+                    if content.startswith("json"):
+                        content = content[4:]
+                    content = content.strip()
                 tailored_data = json.loads(content)
                 tokens_used = response.usage.total_tokens
             except Exception as e:

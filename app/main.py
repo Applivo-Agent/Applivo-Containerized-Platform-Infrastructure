@@ -41,7 +41,24 @@ async def lifespan(app: FastAPI):
     _ = settings.recordings_path
     logger.info("Storage directories ready")
 
+    # Start the scheduler for auto-scrape and auto-apply
+    from app.services.scheduler_service import SchedulerService, setup_default_jobs
+    scheduler = SchedulerService()
+    scheduler.start()
+    setup_default_jobs()
+    logger.info("Scheduler started with default jobs")
+
+    # Enable auto-apply if configured
+    if settings.AUTO_APPLY_ENABLED:
+        logger.info("Auto-apply is enabled")
+
     yield
+
+    # Shutdown scheduler
+    from app.services.scheduler_service import SchedulerService
+    scheduler = SchedulerService()
+    scheduler.shutdown()
+    logger.info("Scheduler stopped")
 
     await close_db()
     logger.info("Database connections closed")
@@ -147,7 +164,7 @@ def create_app() -> FastAPI:
     # Auth & core
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(onboarding_router, prefix=API_PREFIX)
-    app.include_router(scheduler_router, prefix=API_PREFIX)
+    app.include_router(scheduler_router, prefix=API_PREFIX)  # /api/scheduler
     app.include_router(jobs_router, prefix=API_PREFIX)
     app.include_router(profile_router, prefix=API_PREFIX)
     app.include_router(security_router, prefix=API_PREFIX)

@@ -62,6 +62,19 @@ def auto_apply(self):
         raise self.retry(exc=e)
 
 
+@celery_app.task(bind=True, max_retries=3)
+def apply_to_job(self, application_id: str):
+    """Apply to a single job using the bot."""
+    try:
+        from app.agents.apply_bot import ApplyBot
+        bot = ApplyBot()
+        result = _run_async(bot.apply(application_id))
+        logger.info("Apply to job completed", application_id=application_id, result=result)
+    except Exception as e:
+        logger.error("Apply to job failed", application_id=application_id, error=str(e))
+        raise self.retry(exc=e)
+
+
 @celery_app.task(bind=True, max_retries=2)
 def send_notification(self, notification_id: str):
     """Send a specific notification."""
