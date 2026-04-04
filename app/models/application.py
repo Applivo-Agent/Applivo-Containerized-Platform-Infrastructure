@@ -22,6 +22,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +71,9 @@ class Application(Base, UUIDMixin, TimestampMixin):
     Single job application with full lifecycle tracking.
     """
     __tablename__ = "applications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_application_user_job"),
+    )
 
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), nullable=False, index=True)

@@ -42,8 +42,8 @@ def scrape_jobs(self):
 def analyze_jobs(self):
     """Run AI analysis on scraped jobs."""
     try:
-        from app.agents.tasks import analyze_new_jobs
-        _run_async(analyze_new_jobs())
+        from app.agents.tasks import analyze_new_jobs_batch_task
+        _run_async(analyze_new_jobs_batch_task())
         logger.info("Job analysis completed")
     except Exception as e:
         logger.error("Job analysis failed", error=str(e))
@@ -189,8 +189,9 @@ def priority_scrape(self, user_id: str):
 def priority_apply(self, application_id: str):
     """Priority apply for Pro/Premium users."""
     try:
-        from app.agents.apply_bot import auto_apply_single
-        _run_async(auto_apply_single(application_id))
+        from app.agents.apply_bot import ApplyBot
+        bot = ApplyBot()
+        _run_async(bot.apply(application_id))
         logger.info("Priority apply completed", application_id=application_id)
     except Exception as e:
         logger.error("Priority apply failed", application_id=application_id, error=str(e))

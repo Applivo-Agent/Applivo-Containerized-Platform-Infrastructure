@@ -396,7 +396,7 @@ async def list_resumes(
 @resumes_router.post("/upload", response_model=ResumeOut, status_code=201)
 async def upload_resume(
     file: UploadFile = File(...),
-    name: str = Query(...),
+    name: Optional[str] = Query(default=None),
     resume_type: str = Query(default="base"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -404,6 +404,10 @@ async def upload_resume(
     """Upload a PDF resume file."""
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    
+    # Use provided name or fallback to filename without extension
+    if not name:
+        name = file.filename.replace(".pdf", "") if file.filename else "Untitled Resume"
 
     from app.core.config import settings
     import uuid
@@ -528,11 +532,25 @@ async def set_custom_latex_template(
     return result
 
 
-@resumes_router.get("/latex/templates", response_model=list)
+@resumes_router.get("/latex/templates", response_model=dict)
 async def list_latex_templates():
-    """List all available LaTeX resume templates."""
+    """List all available LaTeX resume templates with current selection."""
     from app.services.overleaf_service import OverleafService
-    return OverleafService().list_available_templates()
+    service = OverleafService()
+    available = service.list_available_templates()
+    current = service.get_current_template()
+    selected = "default"
+    # Find which template is currently selected
+    if service._custom_template:
+        for t in available:
+            if t.get("filename"):
+                try:
+                    if service.load_template(t["name"]) == service._custom_template:
+                        selected = t["name"]
+                        break
+                except:
+                    pass
+    return {"available": available, "selected": selected}
 
 
 @resumes_router.get("/latex/template", response_model=dict)
@@ -1192,3 +1210,64 @@ async def get_resume_performance(
         }
         for r in resumes
     ]
+
+
+@analytics_router.get("/velocity")
+async def get_application_velocity(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    days: int = Query(default=7, le=30),
+):
+    """Application velocity over time."""
+    from datetime import timedelta
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    result = await db.execute(
+        select(Application)
+        .where(
+            Application.user_id == current_user.id,
+            Application.created_at >= start_date
+        )
+    )
+    apps = result.scalars().all()
+    
+    # Group by date
+    by_date: dict[str, int] = {}
+    for app in apps:
+        date_str = app.created_at.date().isoformat()
+        by_date[date_str] = by_date.get(date_str, 0) + 1
+    
+    # Format for chart
+    timeline = []
+    for i in range(days):
+        from datetime import date
+        d = date.today() - timedelta(days=days - i - 1)
+        timeline.append({
+            "name": d.strftime("%a"),
+            "applied": by_date.get(d.isoformat(), 0),
+            "interviews": 0,
+        })
+    
+    return timeline
+
+
+@analytics_router.get("/funnel")
+async def get_conversion_funnel(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Application conversion funnel."""
+    result = await db.execute(
+        select(Application.status, func.count(Application.id).label("count"))
+        .where(Application.user_id == current_user.id)
+        .group_by(Application.status)
+    )
+    counts = {row.status: row.count for row in result.all()}
+    
+    return {
+        "applied": counts.get("applied", 0) + counts.get("pending_approval", 0) + counts.get("queued", 0) + counts.get("applying", 0),
+        "viewed": counts.get("viewed", 0),
+        "shortlisted": counts.get("shortlisted", 0),
+        "interview": counts.get("interview_scheduled", 0) + counts.get("interview_completed", 0),
+        "offer": counts.get("offer_received", 0) + counts.get("offer_accepted", 0),
+    }

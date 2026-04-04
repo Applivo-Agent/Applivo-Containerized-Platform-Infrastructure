@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     AUTO_APPLY_MATCH_THRESHOLD: int = 40
     AUTO_APPLY_DAILY_LIMIT: int = 10
     AUTO_APPLY_REQUIRE_APPROVAL: bool = True
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     USER_NAME: str = ""
     USER_EMAIL: str = ""
     USER_PHONE: str = ""

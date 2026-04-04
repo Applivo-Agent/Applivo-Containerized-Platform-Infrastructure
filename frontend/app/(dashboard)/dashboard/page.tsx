@@ -174,7 +174,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div className="p-3 bg-muted/50 rounded-lg">
               <p className="text-xs text-muted-foreground mb-1">Last run</p>
-              <p className="font-medium">{agentStatus?.last_run ? timeAgo(agentStatus.last_run) : "Never"}</p>
+              <p className="font-medium">{agentStatus?.last_run_at ? timeAgo(agentStatus.last_run_at) : "Never"}</p>
             </div>
             <div className="p-3 bg-muted/50 rounded-lg">
               <p className="text-xs text-muted-foreground mb-1">Jobs today</p>

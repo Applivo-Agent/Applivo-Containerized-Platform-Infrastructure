@@ -41,12 +41,15 @@ async def lifespan(app: FastAPI):
     _ = settings.recordings_path
     logger.info("Storage directories ready")
 
-    # Start the scheduler for auto-scrape and auto-apply
-    from app.services.scheduler_service import SchedulerService, setup_default_jobs
-    scheduler = SchedulerService()
-    scheduler.start()
-    setup_default_jobs()
-    logger.info("Scheduler started with default jobs")
+    # Start the scheduler for auto-scrape and auto-apply (dev only - Celery Beat handles production)
+    if settings.APP_ENV == "development":
+        from app.services.scheduler_service import SchedulerService, setup_default_jobs
+        scheduler = SchedulerService()
+        scheduler.start()
+        setup_default_jobs()
+        logger.info("Scheduler started with default jobs (dev mode)")
+    else:
+        logger.info("Scheduler disabled - using Celery Beat in production")
 
     # Enable auto-apply if configured
     if settings.AUTO_APPLY_ENABLED:
@@ -54,11 +57,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown scheduler
-    from app.services.scheduler_service import SchedulerService
-    scheduler = SchedulerService()
-    scheduler.shutdown()
-    logger.info("Scheduler stopped")
+    # Shutdown scheduler (dev only)
+    if settings.APP_ENV == "development":
+        from app.services.scheduler_service import SchedulerService
+        scheduler = SchedulerService()
+        scheduler.shutdown()
+        logger.info("Scheduler stopped")
 
     await close_db()
     logger.info("Database connections closed")
@@ -80,7 +84,7 @@ def create_app() -> FastAPI:
     # ── CORS ──────────────────────────────────────────────────
     allowed_origins = (
         ["*"] if settings.APP_ENV == "development"
-        else ["http://localhost:3000", "http://127.0.0.1:3000", "http://192.0.0.2:3000"]
+        else settings.ALLOWED_ORIGINS
     )
     app.add_middleware(
         CORSMiddleware,
@@ -95,13 +99,16 @@ def create_app() -> FastAPI:
     async def global_exception_handler(request: Request, exc: Exception):
         import traceback
         tb = traceback.format_exc()
-        logger.error("Unhandled exception", path=request.url.path, error=str(exc), traceback=tb)
+        # Don't expose full traceback in production
+        if settings.APP_ENV == "production":
+            logger.error("Unhandled exception", path=request.url.path, error=str(exc))
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error", "error_id": id(exc) % 10000}
+            )
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": str(exc),
-                "error": tb,
-            },
+            status_code=500,
+            content={"detail": str(exc), "traceback": tb}
         )
 
     # ── Rate limiting middleware ───────────────────────────────

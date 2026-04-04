@@ -63,7 +63,7 @@ export const jobsApi = {
   get: (id: string) => api.get(`/jobs/${id}`),
   analyze: (id: string) => api.post(`/jobs/${id}/analyze`),
   skip: (id: string) => api.post(`/jobs/${id}/skip`),
-  scrape: () => api.get("/jobs/scrape"),
+  scrape: () => api.post("/jobs/scrape"),
 };
 
 // ─── Applications ─────────────────────────────────────────────────────────
@@ -120,6 +120,8 @@ export const analyticsApi = {
   skillGaps: () => api.get("/analytics/skill-gaps"),
   market: () => api.get("/analytics/market"),
   resumePerformance: () => api.get("/analytics/resume-performance"),
+  velocity: (days?: number) => api.get("/analytics/velocity", { params: { days } }),
+  funnel: () => api.get("/analytics/funnel"),
 };
 
 // ─── Chat ─────────────────────────────────────────────────────────────────
@@ -179,13 +181,13 @@ export const securityApi = {
 // ─── Admin ────────────────────────────────────────────────────────────────
 export const adminApi = {
   stats: () => api.get("/admin/stats"),
-  health: () => api.get("/admin/health"),
+  health: () => api.get("/admin/system/health"),
   users: (params?: Record<string, unknown>) => api.get("/admin/users", { params }),
   getUser: (id: string) => api.get(`/admin/users/${id}`),
-  updateUserPlan: (id: string, data: Record<string, unknown>) =>
-    api.post(`/admin/users/${id}/plan`, data),
-  suspendUser: (id: string) => api.post(`/admin/users/${id}/suspend`),
-  reactivateUser: (id: string) => api.post(`/admin/users/${id}/reactivate`),
+  updateUser: (id: string, data: Record<string, unknown>) =>
+    api.patch(`/admin/users/${id}`, data),
+  suspendUser: (id: string) => api.patch(`/admin/users/${id}`, { is_active: false }),
+  reactivateUser: (id: string) => api.patch(`/admin/users/${id}`, { is_active: true }),
   auditLogs: (params?: Record<string, unknown>) =>
     api.get("/admin/audit-logs", { params }),
 };
