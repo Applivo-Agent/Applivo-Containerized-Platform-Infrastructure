@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { subscriptionsApi, quotasApi } from "./api";
 import { useAuth } from "./auth";
 
-export type PlanTier = "admin" | "pro" | "premium" | "none";
+export type PlanTier = "starter" | "pro" | "premium" | "none";
 
 export interface Subscription {
   id: string;
@@ -45,15 +45,15 @@ export type Feature =
 
 const FEATURE_REQUIREMENTS: Record<Feature, PlanTier[]> = {
   // All plans
-  jobs: ["admin", "pro", "premium"],
-  applications: ["admin", "pro", "premium"],
-  resumes: ["admin", "pro", "premium"],
-  profile: ["admin", "pro", "premium"],
-  settings: ["admin", "pro", "premium"],
-  analytics: ["admin", "pro", "premium"],
-  chat: ["admin", "pro", "premium"],
-  dashboard: ["admin", "pro", "premium"],
-  connect: ["admin", "pro", "premium"],
+  jobs: ["starter", "pro", "premium"],
+  applications: ["starter", "pro", "premium"],
+  resumes: ["starter", "pro", "premium"],
+  profile: ["starter", "pro", "premium"],
+  settings: ["starter", "pro", "premium"],
+  analytics: ["starter", "pro", "premium"],
+  chat: ["starter", "pro", "premium"],
+  dashboard: ["starter", "pro", "premium"],
+  connect: ["starter", "pro", "premium"],
   // Pro+
   cover_letters: ["pro", "premium"],
   interviews: ["pro", "premium"],
@@ -69,7 +69,7 @@ const FEATURE_REQUIREMENTS: Record<Feature, PlanTier[]> = {
 
 export const PLAN_FEATURES: Record<PlanTier, string[]> = {
   none: [],
-  admin: [
+  starter: [
     "150 daily applications",
     "Internshala scraping",
     "Auto-apply bot",
@@ -82,7 +82,7 @@ export const PLAN_FEATURES: Record<PlanTier, string[]> = {
   ],
   pro: [
     "250 daily applications",
-    "Everything in Admin",
+    "Everything in Starter",
     "Full AI analysis (LLaMA-70B)",
     "Cover letter generator",
     "Telegram notifications",
@@ -106,7 +106,7 @@ export const PLAN_FEATURES: Record<PlanTier, string[]> = {
 
 export const PLAN_PRICES: Record<PlanTier, number> = {
   none: 0,
-  admin: 0,
+  starter: 0,
   pro: 400,
   premium: 800,
 };
@@ -144,7 +144,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   }, [isAuthenticated]);
 
   const isSuper = user?.is_superuser ?? false;
-  const plan = isSuper ? "admin" : ((subscription?.status === "active" ? subscription?.plan : "none") ?? "none");
+  const plan = isSuper ? "premium" : ((subscription?.status === "active" ? subscription?.plan : "none") ?? "none");
   const isActive = isSuper || subscription?.status === "active";
   const isPro = isSuper || plan === "pro" || plan === "premium";
   const isPremium = isSuper || plan === "premium";

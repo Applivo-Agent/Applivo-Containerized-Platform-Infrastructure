@@ -7,8 +7,8 @@ import { PLAN_FEATURES, PLAN_PRICES } from "@/lib/subscription";
 
 const plans = [
   {
-    tier: "admin" as const,
-    label: "Admin",
+    tier: "starter" as const,
+    label: "Starter",
     popular: false,
     color: "border-zinc-700",
     btnClass: "bg-zinc-700 hover:bg-zinc-600 text-white",
@@ -21,6 +21,14 @@ const plans = [
     color: "border-brand-purple glow-border-purple",
     btnClass: "bg-brand-purple hover:bg-brand-purple/90 text-white",
     badge: "Most Popular",
+  },
+  {
+    tier: "premium" as const,
+    label: "Premium",
+    popular: false,
+    color: "border-amber-500/60",
+    btnClass: "bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 text-white",
+    badge: "Best Value",
   },
 ];
 
