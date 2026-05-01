@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 560">
+  <rect fill="#ffffff" width="400" height="560"/>
+  <rect fill="#003366" x="0" y="0" width="400" height="85"/>
+  <text x="25" y="50" fill="#ffffff" font-size="16" font-weight="bold">JOHN DOE</text>
+  <text x="25" y="70" fill="#ffcc00" font-size="10">B.Tech | IIT Delhi</text>
+  <rect fill="#003366" x="0" y="85" width="400" height="3"/>
+  <text x="25" y="115" fill="#003366" font-size="12" font-weight="bold">EDUCATION</text>
+  <rect x="25" y="130" width="180" height="5" fill="#003366"/>
+  <rect x="25" y="145" width="220" height="3" fill="#666"/>
+  <text x="25" y="180" fill="#003366" font-size="12" font-weight="bold">INTERNSHIP</text>
+  <rect x="25" y="195" width="150" height="5" fill="#003366"/>
+  <rect x="25" y="210" width="200" height="3" fill="#666"/>
+  <text x="25" y="245" fill="#003366" font-size="12" font-weight="bold">SKILLS</text>
+  <rect x="25" y="260" width="100" height="10" fill="#003366" rx="2"/>
+  <rect x="135" y="260" width="80" height="10" fill="#ffcc00" rx="2"/>
+  <rect x="225" y="260" width="70" height="10" fill="#003366" rx="2"/>
+</svg>

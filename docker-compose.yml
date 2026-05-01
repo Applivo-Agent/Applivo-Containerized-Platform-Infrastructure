@@ -1,0 +1,273 @@
+# ── Applivo SaaS Production Docker Compose ─────────────────
+# Multi-container setup: API, PostgreSQL, Redis, Celery Worker, Celery Beat
+# Usage: docker-compose up -d
+# ─────────────────────────────────────────────────────────────
+# version removed (modern Docker Compose)
+
+services:
+  # ── PostgreSQL Database ────────────────────────────────
+  database:
+    image: postgres:16-alpine
+    container_name: applivo-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: applivo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: applivo
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U applivo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (Message Broker + Result Backend) ────────────
+  redis:
+    image: redis:7-alpine
+    container_name: applivo-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API Server ────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-backend
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    entrypoint: /app/entrypoint.sh
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - applivo-storage:/app/storage
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Celery Worker (Standard) ──────────────────────────
+  worker-standard:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-worker-std
+    restart: unless-stopped
+    command: ["python", "-m", "celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "default,analysis,notifications,email_monitor,priority"]
+    volumes:
+      - applivo-storage:/app/storage
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "echo healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Celery Worker (Browsing/Scraping) ─────────────────
+  worker-browsing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: applivo-worker-browser
+    restart: unless-stopped
+    command: ["/app/scripts/start_browser_worker.sh"]
+    ports:
+      - "127.0.0.1:5900:5900"
+    volumes:
+      - applivo-storage:/app/storage
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - BROWSER_HEADLESS=False
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "echo healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Celery Beat (Periodic Task Scheduler) ─────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=info", "--schedule=/app/storage/celerybeat-schedule"]
+    volumes:
+      - applivo-storage:/app/storage
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - DEBUG=False
+      - APP_HOST=0.0.0.0
+      - DATABASE_URL=postgresql+asyncpg://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "echo healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Celery Flower (Task Monitoring UI) ────────────────
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-flower
+    restart: unless-stopped
+    command: >
+      python -m celery -A app.celery_app:celery_app flower --port=5555
+      --basic_auth=admin:${FLOWER_PASSWORD}
+      --url_prefix=flower
+    ports:
+      - "127.0.0.1:5555:5555"
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - FLOWER_PASSWORD=${FLOWER_PASSWORD:?Set FLOWER_PASSWORD in .env}
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD-SHELL", "echo healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Frontend (Next.js Application) ────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+        - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+    container_name: applivo-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  applivo-storage:
+    driver: local

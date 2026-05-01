@@ -1,0 +1,149 @@
+%-------------------------
+% Resume in Latex
+% Author : Puneet Gautam
+% License : MIT
+%------------------------
+
+\documentclass[a4paper,11pt]{article}
+\usepackage{latexsym}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage[empty]{fullpage}
+\usepackage{wrapfig}
+\usepackage{lipsum}
+\usepackage{tabularx}
+\usepackage{titlesec}
+\usepackage{geometry}
+\usepackage{marvosym}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{multicol}
+\usepackage{graphicx}
+\usepackage{cfr-lm}
+\usepackage[T1]{fontenc}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\geometry{left=0.6cm, top=0.5cm, right=0.6cm, bottom=0.5cm}
+
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-7pt}]
+
+\newcommand{\resumeItem}[2]{
+  \item{
+    \textbf{#1}{:\hspace{0.5mm}#2 \vspace{-0.5mm}}
+  }
+}
+
+\newcommand{\resumePOR}[3]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1},\hspace{0.3mm}#2 & \textit{\small{#3}} 
+    \end{tabular*}
+}
+
+\newcommand{\resumeSubheading}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\footnotesize{#4}} \\
+        \textit{\footnotesize{#3}} &  \footnotesize{#2}\\
+    \end{tabular*}
+}
+
+\newcommand{\resumeProject}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\footnotesize{#3}} \\
+        \textit{#2} & #4
+    \end{tabular*}
+}
+
+\newcommand{\resumeSubItem}[2]{\resumeItem{#1}{#2}\vspace{-4pt}}
+\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=*,labelsep=0mm]}
+\newcommand{\resumeHeadingSkillStart}{\begin{itemize}[leftmargin=*,itemsep=1.7mm, rightmargin=2ex]}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=3ex, rightmargin=2ex, noitemsep,labelsep=1.2mm,itemsep=0mm]\small}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}\vspace{2mm}}
+\newcommand{\resumeHeadingSkillEnd}{\end{itemize}\vspace{-2mm}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-2mm}}
+
+\begin{document}
+\begin{tabularx}{\linewidth}{L r}
+  \textbf{\LARGE YOUR NAME} & +91-Phone Number\\
+  
+  Your Degree &  email@example.com\\
+   Your Major &  \href{https://github.com/username}{GitHub} \\
+  University Name & \href{https://linkedin.com/in/username}{LinkedIn}
+\end{tabularx}
+
+\section{Education}
+\begin{tabularx}{\dimexpr\textwidth-2mm\relax}{|c|C|c|c|}
+  \hline
+  \textbf{Year} & \textbf{Degree} & \textbf{Institute} & \textbf{CGPA/\%} \\
+  \hline
+  2023-Present & B.Tech & University Name & 9.0\\
+  \hline
+  2021 & XII & School Name & 90\% \\
+  \hline
+  2019 & X & School Name & 9.2 \\
+  \hline
+\end{tabularx}
+
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Company Name}{Location}
+      {Position}{Date}
+      \resumeItemListStart
+        \item Responsibility/achievement
+        \item Another point
+      \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+\section{Projects}
+\resumeSubHeadingListStart
+    \resumeProject
+      {Project Name}
+      {Description}
+      {Date}
+      {\href{Github Link}{\textbf{Github}}}
+      \resumeItemListStart
+        \item About project
+      \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+\section{Technical Skills}
+ \resumeHeadingSkillStart
+  \resumeSubItem{Programming Languages}
+    { Python, C/C++, JavaScript}
+ \resumeSubItem{Tools and Frameworks}
+    {React, Node.js, Docker}
+ \resumeSubItem{Operating Systems}
+    {Windows, Linux}
+ \resumeHeadingSkillEnd
+
+\section{Key Courses}
+Data Structures, Algorithms, Database Management, Operating Systems, Computer Networks, Machine Learning
+
+\section{Certifications}
+    \resumeItemListStart
+        \item \textbf{Certificate Name} - Institution
+    \resumeItemListEnd
+
+\section{Positions of Responsibility}
+  \resumeSubHeadingListStart
+  \resumePOR{Position}{Organization}{Year}
+  \resumeSubHeadingListEnd
+
+\section{Miscellaneous}
+\resumeSubHeadingListStart
+\resumePOR{Achievement}{Description}{Year}
+\resumeSubHeadingListEnd
+
+\end{document}

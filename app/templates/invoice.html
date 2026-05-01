@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice - Applivo</title>
+    <style>
+        :root {
+            --blue: #3558e6;
+            --blue-dark: #1f3fbf;
+            --blue-soft: #eef2ff;
+            --border: #d8e1ff;
+            --text-dark: #1f2a44;
+            --text-muted: #667085;
+            --success: #10b981;
+        }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            color: var(--text-dark);
+            line-height: 1.5;
+            margin: 0;
+            padding: 24px;
+            background: linear-gradient(180deg, #f8faff 0%, #ffffff 28%, #ffffff 100%);
+        }
+        .invoice-container {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            background: linear-gradient(135deg, #3558e6 0%, #4d6cf0 55%, #6e86f6 100%);
+            color: #fff;
+            border-radius: 26px;
+            padding: 18px 20px;
+            box-shadow: 0 24px 50px rgba(53, 88, 230, 0.18);
+            align-items: stretch;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+        }
+        .logo {
+            width: 54px;
+            height: 54px;
+            object-fit: contain;
+            flex: 0 0 auto;
+        }
+        .brand-name {
+            font-size: 32px;
+            font-weight: 500;
+            letter-spacing: -0.03em;
+            line-height: 1;
+        }
+        .brand-meta {
+            margin-top: 8px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.82);
+        }
+        .meta-card {
+            width: 290px;
+            background: rgba(255, 255, 255, 0.96);
+            color: var(--text-dark);
+            border-radius: 18px;
+            padding: 14px 16px;
+            align-self: flex-start;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+        }
+        .meta-card div {
+            font-size: 13px;
+            margin: 2px 0;
+            word-break: break-word;
+        }
+        .meta-card strong {
+            font-weight: 600;
+        }
+        .title-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin: 24px 0 18px;
+        }
+        .title-line {
+            height: 1px;
+            background: #cfd8ff;
+            flex: 1;
+        }
+        .invoice-title {
+            font-size: 52px;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            color: var(--blue-dark);
+            line-height: 1;
+        }
+        .bill-wrap {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 18px;
+            position: relative;
+            margin-bottom: 18px;
+        }
+        .bill-wrap .paid-badge {
+            position: absolute;
+            right: 14px;
+            top: -16px;
+            background: var(--success);
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            box-shadow: 0 12px 25px rgba(16, 185, 129, 0.24);
+        }
+        .card {
+            background: #fff;
+            border: 1px solid rgba(216, 225, 255, 0.95);
+            border-radius: 22px;
+            padding: 18px;
+            box-shadow: 0 12px 30px rgba(31, 42, 68, 0.04);
+        }
+        .card-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
+            letter-spacing: 0.08em;
+            margin-bottom: 14px;
+        }
+        .bill-name {
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--text-dark);
+            margin-bottom: 4px;
+        }
+        .bill-text {
+            font-size: 13px;
+            color: var(--text-dark);
+            margin: 2px 0;
+            word-break: break-word;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 18px 0 0;
+        }
+        th {
+            text-align: left;
+            padding: 15px 14px;
+            background: var(--blue-soft);
+            color: var(--blue-dark);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        td {
+            padding: 16px 14px;
+            border-bottom: 1px solid #eef2ff;
+            font-size: 14px;
+            vertical-align: top;
+        }
+        .amount-col {
+            text-align: right;
+        }
+        .total-section {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            margin-top: 16px;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            width: 280px;
+            padding: 7px 0;
+        }
+        .total-label {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .total-value {
+            color: var(--text-dark);
+            font-weight: 600;
+            font-size: 13px;
+        }
+        .grand-total {
+            margin-top: 12px;
+            border-top: 2px solid #6678ee;
+            padding-top: 10px;
+        }
+        .grand-total .total-label {
+            color: var(--text-dark);
+            font-weight: 700;
+            font-size: 16px;
+        }
+        .grand-total .total-value {
+            color: var(--blue-dark);
+            font-weight: 800;
+            font-size: 20px;
+        }
+        .bottom-spacer {
+            height: 88px;
+        }
+        .footer {
+            margin-top: 22px;
+            background: #eef2ff;
+            border: 1px solid #dbe4ff;
+            border-radius: 18px;
+            padding: 16px 18px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        .footer p { margin: 4px 0; }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        <div class="hero">
+            <div class="brand">
+                <img class="logo" src="/logo.png" alt="Applivo logo">
+                <div>
+                    <div class="brand-name">Applivo</div>
+                    <div class="brand-meta">Applivo AI Job Automation<br>Tamil Nadu, India<br>applivoagent@gmail.com</div>
+                </div>
+            </div>
+            <div class="meta-card">
+                <div>Invoice #: <strong>{{ payment_id }}</strong></div>
+                <div>Date: <strong>{{ date }}</strong></div>
+                <div>Order ID: <strong>{{ order_id }}</strong></div>
+            </div>
+        </div>
+
+        <div class="title-row">
+            <div class="title-line"></div>
+            <div class="invoice-title">INVOICE</div>
+            <div class="title-line"></div>
+        </div>
+
+        <div class="bill-wrap">
+            <div class="paid-badge">PAID</div>
+            <div class="card">
+                <div class="card-title">BILL TO</div>
+                <div class="bill-name">{{ full_name }}</div>
+                <div class="bill-text">{{ email }}</div>
+                <div class="bill-text">User ID: {{ user_id }}</div>
+            </div>
+            <div class="card">
+                <div class="card-title">PAYMENT DETAILS</div>
+                <div class="bill-text"><strong>Method:</strong> Razorpay Secure</div>
+                <div class="bill-text"><strong>Currency:</strong> INR (₹)</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th class="amount-col">Qty</th>
+                        <th class="amount-col">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <strong>Applivo {{ plan_name }} Plan</strong><br>
+                            <span style="color: var(--text-muted); font-size: 12px;">Premium AI job search and auto-application services</span>
+                        </td>
+                        <td class="amount-col">1</td>
+                        <td class="amount-col">₹{{ amount }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="total-section">
+                <div class="total-row">
+                    <span class="total-label">Subtotal</span>
+                    <span class="total-value">₹{{ amount }}</span>
+                </div>
+                <div class="total-row">
+                    <span class="total-label">GST (0%)</span>
+                    <span class="total-value">₹0.00</span>
+                </div>
+                <div class="total-row grand-total">
+                    <span class="total-label">Total Amount Paid</span>
+                    <span class="total-value">₹{{ amount }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-spacer"></div>
+
+        <div class="footer">
+            <p><strong>Applivo AI</strong> — Accelerating Career Growth with Intelligence in Tamil Nadu.</p>
+            <p>Registration Number: APPL_AI-56291 | applivoagent@gmail.com</p>
+            <p>This is a computer-generated document. No signature required.</p>
+        </div>
+    </div>
+</body>
+</html>

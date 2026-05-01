@@ -1,0 +1,569 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   DARK THEME VARIABLES
+   ============================================ */
+:root {
+  --background: 0 0% 4%;
+  --foreground: 0 0% 96%;
+  --card: 0 0% 7%;
+  --card-foreground: 0 0% 96%;
+  --popover: 0 0% 7%;
+  --popover-foreground: 0 0% 96%;
+  --primary: 262 83% 58%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 0 0% 10%;
+  --secondary-foreground: 0 0% 80%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 50%;
+  --accent: 0 0% 12%;
+  --accent-foreground: 0 0% 96%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14%;
+  --input: 0 0% 10%;
+  --ring: 262 83% 58%;
+  --radius: 0.75rem;
+
+  /* Brand palette */
+  --brand-primary: #1E88E5;
+  --brand-primary-light: #3B82F6;
+  --brand-blue: #3b82f6;
+  --brand-cyan: #06b6d4;
+  --brand-green: #10b981;
+  --brand-amber: #f59e0b;
+  --brand-red: #ef4444;
+
+  /* Dark glow effects */
+  --glow-purple: 0 0 40px rgba(30, 136, 229, 0.3);
+  --glow-blue: 0 0 40px rgba(59, 130, 246, 0.3);
+  --glow-green: 0 0 40px rgba(16, 185, 129, 0.3);
+
+  /* Dark surface colors */
+  --surface-0: #000000;
+  --surface-1: #0a0a0a;
+  --surface-2: #111111;
+  --surface-3: #161616;
+  --surface-4: #1a1a1a;
+  --surface-border: rgba(255, 255, 255, 0.06);
+  --surface-border-hover: rgba(255, 255, 255, 0.12);
+}
+
+/* ============================================
+   BASE
+   ============================================ */
+* {
+  box-sizing: border-box;
+  border-color: var(--surface-border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--surface-1);
+  color: #e5e5e5;
+  font-family: 'Outfit', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-serif { font-family: 'Playfair Display', serif; }
+.font-script { font-family: 'Caveat', cursive; }
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ============================================
+   GLASS MORPHISM — DARK
+   ============================================ */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-card {
+  background: #1c1c1e;
+  border: 1px solid var(--surface-border);
+  border-radius: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+
+
+.glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+
+
+/* ============================================
+   DARK SURFACE CARDS
+   ============================================ */
+.dark-card {
+  background: var(--surface-2);
+  border: 1px solid var(--surface-border);
+  border-radius: 1rem;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark-card:hover {
+  border-color: var(--surface-border-hover);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+/* ============================================
+   GRADIENT TEXT
+   ============================================ */
+.gradient-text {
+  background: linear-gradient(135deg, #ffffff, #a0a0a0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-primary {
+  background: linear-gradient(135deg, #3B82F6, #1E88E5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-blue {
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-vibrant {
+  background: linear-gradient(135deg, #3B82F6, #3b82f6, #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ============================================
+   GLOBAL LOADER STYLE (WHITE GRADIENT)
+   ============================================ */
+.animate-spin[class*="border-"] {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  border-right-color: rgba(255, 255, 255, 0.64) !important;
+  border-top-color: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.22);
+}
+
+svg.animate-spin {
+  color: rgba(255, 255, 255, 0.95) !important;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.28));
+}
+
+/* ============================================
+   GLOW BORDERS
+   ============================================ */
+.glow-border-primary {
+  box-shadow: 0 0 0 1px rgba(30, 136, 229, 0.3), var(--glow-purple);
+}
+
+.glow-border-blue {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3), var(--glow-blue);
+}
+
+/* ============================================
+   GRID PATTERN (dark version)
+   ============================================ */
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+.dot-pattern {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ============================================
+   LANDING PAGE HERO — NOISE / MESH
+   ============================================ */
+.hero-glow {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(30, 136, 229, 0.15) 0%, transparent 70%);
+}
+
+.hero-glow-blue {
+  background: radial-gradient(ellipse 60% 40% at 50% 100%, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
+}
+
+/* ============================================
+   MARQUEE
+   ============================================ */
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes marquee-reverse {
+  0%   { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-reverse {
+  animation: marquee-reverse 30s linear infinite;
+}
+
+.marquee-container {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%);
+}
+
+/* ============================================
+   INTEGRATIONS ARC GLOW
+   ============================================ */
+.integration-glow {
+  background: radial-gradient(ellipse 70% 50% at 50% 100%, rgba(30, 136, 229, 0.4) 0%, rgba(59, 130, 246, 0.2) 40%, transparent 70%);
+}
+
+@keyframes orbit-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+@keyframes line-flow {
+  0% { stroke-dashoffset: 100; opacity: 0; }
+  20% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0.6; }
+}
+
+.animate-orbit-pulse { animation: orbit-pulse 3s ease-in-out infinite; }
+
+/* ============================================
+   DASHBOARD CONSISTENCY TOKENS
+   ============================================ */
+.dash-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dash-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dash-title {
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.dash-subtitle {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 500;
+  color: #a1a1aa;
+}
+
+.dash-card {
+  background: #1c1c1e;
+  border: 1px solid #27272a;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.dash-stat-card {
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+
+.dash-label {
+  font-size: 0.625rem;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+
+.dash-value {
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+/* Dashboard font style alignment with sidebar navigation */
+.dashboard-typography {
+  font-family: 'Outfit', sans-serif;
+}
+
+.dashboard-typography h1,
+.dashboard-typography h2,
+.dashboard-typography h3,
+.dashboard-typography h4 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.dashboard-typography p,
+.dashboard-typography span,
+.dashboard-typography button,
+.dashboard-typography label,
+.dashboard-typography a,
+.dashboard-typography li,
+.dashboard-typography input,
+.dashboard-typography select,
+.dashboard-typography textarea {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.dashboard-typography .font-black,
+.dashboard-typography .font-bold,
+.dashboard-typography .font-semibold {
+  font-weight: 600 !important;
+}
+
+.dashboard-typography .font-medium {
+  font-weight: 500 !important;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(1deg); }
+}
+
+@keyframes float-reverse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(12px); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(30, 136, 229, 0.2); }
+  50% { box-shadow: 0 0 50px rgba(30, 136, 229, 0.5); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes shine {
+  0% { left: -200%; }
+  20% { left: 200%; }
+  100% { left: 200%; }
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animated-gradient {
+  background: linear-gradient(-45deg, #0a0a0a, #111111, #0a0a0b, #121214);
+  background-size: 400% 400%;
+  animation: gradientShift 15s ease infinite;
+}
+
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(30, 136, 229, 0.2); }
+  50% { border-color: rgba(30, 136, 229, 0.6); }
+}
+
+.animate-float { animation: float 8s ease-in-out infinite; }
+.animate-float-reverse { animation: float-reverse 10s ease-in-out infinite; }
+.animate-fade-in-up { animation: fade-in-up 0.6s ease forwards; }
+.pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }
+.border-glow { animation: border-glow 2s ease-in-out infinite; }
+
+/* ============================================
+   SHINE BUTTON EFFECT
+   ============================================ */
+.shine-effect {
+  position: relative;
+  overflow: hidden;
+}
+.shine-effect::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -200%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: skewX(-20deg);
+  animation: shine 4s infinite 2s;
+}
+
+/* ============================================
+   SKELETON — DARK
+   ============================================ */
+.skeleton {
+  background: var(--surface-3);
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================
+   STATUS BADGES — DARK
+   ============================================ */
+.status-pending   { background: rgba(99,102,241,0.1); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.2); }
+.status-applied   { background: rgba(59,130,246,0.1); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+.status-viewed    { background: rgba(6,182,212,0.1); color: #22d3ee; border: 1px solid rgba(6,182,212,0.2); }
+.status-shortlisted { background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid rgba(168,85,247,0.2); }
+.status-interview { background: rgba(16,185,129,0.1); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
+.status-offer     { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
+.status-rejected  { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+.status-queued    { background: rgba(99,102,241,0.1); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.2); }
+
+/* ============================================
+   MATCH SCORE — DARK
+   ============================================ */
+.match-high   { background: rgba(16,185,129,0.1); color: #34d399; }
+.match-medium { background: rgba(245,158,11,0.1); color: #fbbf24; }
+.match-low    { background: rgba(239,68,68,0.1); color: #f87171; }
+
+/* ============================================
+   CARD HOVER — DARK
+   ============================================ */
+.card-hover {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s;
+}
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  border-color: rgba(30, 136, 229, 0.2) !important;
+}
+
+/* ============================================
+   SIDEBAR ACTIVE — DARK
+   ============================================ */
+.sidebar-active {
+  background: rgba(30, 136, 229, 0.12);
+  color: #3B82F6;
+  font-weight: 600;
+}
+
+/* ============================================
+   QUOTA COLORS
+   ============================================ */
+.quota-green { color: #34d399; }
+.quota-amber { color: #fbbf24; }
+.quota-red   { color: #f87171; }
+
+/* ============================================
+   BENTO GRID GLOW CARDS
+   ============================================ */
+.bento-card {
+  background: var(--surface-2);
+  border: 1px solid var(--surface-border);
+  border-radius: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bento-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(30, 136, 229, 0.06), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.bento-card:hover {
+  border-color: rgba(30, 136, 229, 0.3);
+  box-shadow: 0 0 0 1px rgba(30, 136, 229, 0.2), 0 20px 60px rgba(30, 136, 229, 0.1);
+  transform: translateY(-4px);
+}
+
+.bento-card:hover::before {
+  opacity: 1;
+}
+
+/* ============================================
+   WORKFLOW TAB
+   ============================================ */
+.workflow-tab-active {
+  background: rgba(30, 136, 229, 0.12);
+  border-color: rgba(30, 136, 229, 0.3) !important;
+  color: #3B82F6;
+}
+
+/* ============================================
+   HERO MOCKUP GRADIENT MASK
+   ============================================ */
+.mockup-fade-bottom {
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+/* ============================================
+   PRICING — DARK
+   ============================================ */
+.pricing-card-popular {
+  background: linear-gradient(135deg, rgba(30, 136, 229, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+  border-color: rgba(30, 136, 229, 0.4) !important;
+}
+
+/* ============================================
+   AUTOFILL OVERRIDES
+   ============================================ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #16171D inset !important;
+  -webkit-text-fill-color: white !important;
+  transition: background-color 5000s ease-in-out 0s;
+}

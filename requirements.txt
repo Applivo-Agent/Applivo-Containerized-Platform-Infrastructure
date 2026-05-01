@@ -1,0 +1,81 @@
+# ── Web Framework ──────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+psycopg2-binary==2.9.9
+
+# ── Database ────────────────────────────────────────────────
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+aiosqlite>=0.19.0
+alembic==1.13.1
+
+# ── Pydantic / Settings ─────────────────────────────────────
+pydantic==2.7.1
+pydantic-settings==2.3.0
+email-validator==2.1.1
+
+# ── Authentication ──────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+cryptography==42.0.8  # For AES-256-GCM encryption
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+
+# ── Task Queue ──────────────────────────────────────────────
+celery==5.4.0
+redis==5.0.4
+APScheduler==3.10.4
+flower==2.0.1          # Celery monitoring UI
+
+# ── AI / LLM ────────────────────────────────────────────────
+openai==1.30.1
+tiktoken==0.7.0
+langchain==0.2.1
+langchain-openai==0.1.7
+google-generativeai==0.8.3
+
+# ── Vector Database ─────────────────────────────────────────
+chromadb==0.5.0
+
+# ── Browser Automation ─────────────────────────────────────
+playwright==1.42.0
+
+# ── HTTP Client ─────────────────────────────────────────────
+httpx==0.27.0
+aiohttp==3.9.5
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# ── Notifications ───────────────────────────────────────────
+python-telegram-bot==21.2
+
+# ── Email ───────────────────────────────────────────────────
+aiosmtplib==3.0.1
+jinja2==3.1.4           # Email templates
+
+# ── PDF Generation ──────────────────────────────────────────
+weasyprint==62.1
+reportlab==4.2.0
+
+# ── PDF Parsing / Extraction ────────────────────────────────
+pdfplumber==0.10.3      # Extract text from PDFs
+PyPDF2==3.0.1           # PDF manipulation
+
+# ── Audio / Transcription ───────────────────────────────────
+# openai-whisper removed — install separately if needed
+
+# ── File Storage ────────────────────────────────────────────
+boto3==1.34.113         # S3 compatible storage
+aiofiles==23.2.1
+
+# ── Utilities ───────────────────────────────────────────────
+python-dotenv==1.0.1
+python-magic==0.4.27    # MIME-type validation
+sentry-sdk[fastapi]==2.3.1 # Error tracking
+python-dateutil==2.9.0
+pytz==2024.1
+structlog==24.1.0
+tenacity==8.3.0         # Retry logic
+fake-useragent==1.5.1   # Scraper user agent rotation

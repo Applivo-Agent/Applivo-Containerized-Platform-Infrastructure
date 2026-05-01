@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+env/
+.venv*
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+
+# Session files
+linkedin_session.json
+
+# Sensitive data - DO NOT COMMIT
+storage/*.json
+storage/*.pdf
+storage/resumes/*.pdf
+storage/screenshots/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Celery
+celerybeat-schedule
+*.pid
+
+# Docker volumes
+postgres-data/
+redis-data/
