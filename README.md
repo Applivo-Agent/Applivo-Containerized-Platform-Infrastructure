@@ -8,6 +8,7 @@
   <strong>The AI-powered job application platform.</strong>
 </p>
 
+
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen"/>
   &nbsp;
