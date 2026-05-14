@@ -20,7 +20,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white"/>
   &nbsp;
-  <a href="https://x.com/YOUR_HANDLE">
+  <a href="[https://x.com/YOUR_HANDLE](https://x.com/applivo_in)">
     <img src="https://img.shields.io/badge/Follow%20%40Applivo-000000?logo=x&logoColor=white"/>
   </a>
 </p>
