@@ -27,8 +27,7 @@ from app.services.subscription_service import subscription_service
 logger = structlog.get_logger()
 
 
-ADMIN_ANALYZE_RUN_TOKEN_LIMIT = 150000
-ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT = 1500000
+ADMIN_UNLIMITED_SENTINEL = 999_999_999
 
 
 class AnalyzeBudgetService:
@@ -201,50 +200,20 @@ class AnalyzeBudgetService:
         is_superuser = bool(user.is_superuser)
 
         if is_superuser:
-            if not await self._jobs_user_id_exists():
-                return {
-                    "allowed": False,
-                    "plan": "premium",
-                    "is_unlimited": False,
-                    "run_limit_tokens": ADMIN_ANALYZE_RUN_TOKEN_LIMIT,
-                    "monthly_limit_tokens": ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT,
-                    "daily_plan_tokens": ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT // 30,
-                    "used_day_tokens": 0,
-                    "used_month_tokens": 0,
-                    "remaining_month_tokens": 0,
-                    "reason": "Analyze budget unavailable until jobs.user_id is migrated",
-                }
-
             used_day = await self.get_daily_analyze_tokens_used(user_id)
             used_month = await self.get_monthly_analyze_tokens_used(user_id)
-            remaining = max(0, ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT - used_month)
-
-            await self._maybe_send_usage_warning_email(
-                user_id=user_id,
-                plan="admin",
-                monthly_limit=ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT,
-                used_month=used_month,
-            )
-
-            if remaining <= 0:
-                await self._maybe_send_limit_reached_email(
-                    user_id=user_id,
-                    plan="admin",
-                    monthly_limit=ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT,
-                    used_month=used_month,
-                )
 
             return {
-                "allowed": remaining > 0,
+                "allowed": True,
                 "plan": "premium",
-                "is_unlimited": False,
-                "run_limit_tokens": ADMIN_ANALYZE_RUN_TOKEN_LIMIT,
-                "monthly_limit_tokens": ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT,
-                "daily_plan_tokens": ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT // 30,
+                "is_unlimited": True,
+                "run_limit_tokens": ADMIN_UNLIMITED_SENTINEL,
+                "monthly_limit_tokens": ADMIN_UNLIMITED_SENTINEL,
+                "daily_plan_tokens": ADMIN_UNLIMITED_SENTINEL,
                 "used_day_tokens": used_day,
                 "used_month_tokens": used_month,
-                "remaining_month_tokens": remaining,
-                "reason": None if remaining > 0 else f"Monthly analyze token budget exhausted ({ADMIN_ANALYZE_MONTHLY_TOKEN_LIMIT:,})",
+                "remaining_month_tokens": ADMIN_UNLIMITED_SENTINEL,
+                "reason": None,
             }
 
         sub = await subscription_service.get_active_subscription(user_id)
@@ -266,20 +235,6 @@ class AnalyzeBudgetService:
         run_limit = int(PLAN_ANALYZE_RUN_TOKEN_LIMITS.get(plan, 0))
         monthly_limit = int(PLAN_ANALYZE_MONTHLY_TOKEN_LIMITS.get(plan, 0))
         daily_plan_tokens = monthly_limit // 30 if monthly_limit > 0 else 0
-
-        if not await self._jobs_user_id_exists():
-            return {
-                "allowed": False,
-                "plan": plan.value,
-                "is_unlimited": False,
-                "run_limit_tokens": run_limit,
-                "monthly_limit_tokens": monthly_limit,
-                "daily_plan_tokens": daily_plan_tokens,
-                "used_day_tokens": 0,
-                "used_month_tokens": 0,
-                "remaining_month_tokens": 0,
-                "reason": "Analyze budget unavailable until jobs.user_id is migrated",
-            }
 
         used_day = await self.get_daily_analyze_tokens_used(user_id)
         used_month = await self.get_monthly_analyze_tokens_used(user_id)
@@ -318,22 +273,19 @@ class AnalyzeBudgetService:
         now = datetime.now(timezone.utc)
         day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 
+        from app.models.ai_usage import AIUsageLog
         async with get_db_context() as db:
-            if not await self._jobs_user_id_exists():
-                return 0
             try:
                 result = await db.execute(
-                    select(func.coalesce(func.sum(JobAnalysis.tokens_used), 0))
-                    .select_from(JobAnalysis)
-                    .join(Job, JobAnalysis.job_id == Job.id)
+                    select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0))
                     .where(
-                        Job.user_id == user_id,
-                        JobAnalysis.created_at >= day_start,
-                        JobAnalysis.tokens_used.is_not(None),
+                        AIUsageLog.user_id == user_id,
+                        AIUsageLog.created_at >= day_start,
+                        AIUsageLog.success == True
                     )
                 )
                 return int(result.scalar() or 0)
-            except ProgrammingError:
+            except Exception:
                 await db.rollback()
                 return 0
 
@@ -341,22 +293,19 @@ class AnalyzeBudgetService:
         now = datetime.now(timezone.utc)
         month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
+        from app.models.ai_usage import AIUsageLog
         async with get_db_context() as db:
-            if not await self._jobs_user_id_exists():
-                return 0
             try:
                 result = await db.execute(
-                    select(func.coalesce(func.sum(JobAnalysis.tokens_used), 0))
-                    .select_from(JobAnalysis)
-                    .join(Job, JobAnalysis.job_id == Job.id)
+                    select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0))
                     .where(
-                        Job.user_id == user_id,
-                        JobAnalysis.created_at >= month_start,
-                        JobAnalysis.tokens_used.is_not(None),
+                        AIUsageLog.user_id == user_id,
+                        AIUsageLog.created_at >= month_start,
+                        AIUsageLog.success == True
                     )
                 )
                 return int(result.scalar() or 0)
-            except ProgrammingError:
+            except Exception:
                 await db.rollback()
                 return 0
 

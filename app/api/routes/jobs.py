@@ -65,6 +65,16 @@ def _normalize_job_source_filter(value: Optional[str]) -> Optional[JobSource]:
         return None
 
 
+def _normalize_job_status_filter(value: Optional[str]) -> Optional[JobStatus]:
+    if value is None:
+        return None
+    normalized = str(value).strip().upper().replace("-", "_")
+    try:
+        return JobStatus[normalized]
+    except KeyError:
+        return None
+
+
 @router.get("/count")
 async def get_job_count(
     db: AsyncSession = Depends(get_db),
@@ -267,7 +277,7 @@ async def list_jobs(
                 )
             )
         if status:
-            explicit_query = explicit_query.where(Job.status == status)
+            explicit_query = explicit_query.where(func.lower(cast(Job.status, String)) == status.lower())
 
         sort_col_map = {
             "match_score": JobAnalysis.match_score,
@@ -321,8 +331,9 @@ async def list_jobs(
                 Job.description_clean.ilike(f"%{keyword}%"),
             )
         )
-    if status:
-        query = query.where(func.lower(Job.status.cast(String)) == status.lower())
+    normalized_status = _normalize_job_status_filter(status)
+    if normalized_status:
+        query = query.where(Job.status == normalized_status)
 
     # Sorting
     sort_col_map = {
@@ -399,8 +410,9 @@ async def list_jobs(
                     Job.description_clean.ilike(f"%{keyword}%"),
                 )
             )
-        if status:
-            explicit_query = explicit_query.where(func.lower(Job.status.cast(String)) == status.lower())
+        normalized_status = _normalize_job_status_filter(status)
+        if normalized_status:
+            explicit_query = explicit_query.where(Job.status == normalized_status)
 
         sort_col_map = {
             "match_score": JobAnalysis.match_score,
@@ -569,7 +581,8 @@ async def _trigger_job_analysis(job_id: str):
             result = await db.execute(select(Job).where(Job.id == job_id))
             job = result.scalar_one_or_none()
             if job:
-                await analyze_new_jobs_batch_task()
+                from app.services.job_analyzer import JobAnalyzerService
+                await JobAnalyzerService().analyze(job_id)
                 import structlog
                 log = structlog.get_logger()
                 log.info("Job analysis completed", job_id=job_id)

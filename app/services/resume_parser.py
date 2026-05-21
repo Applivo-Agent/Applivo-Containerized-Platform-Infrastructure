@@ -145,7 +145,19 @@ class ResumeParser:
             text = []
             with pdfplumber.open(file_path) as pdf:
                 for page_num, page in enumerate(pdf.pages, 1):
-                    page_text = page.extract_text()
+                    page_text = None
+                    try:
+                        # Try standard high-fidelity extraction
+                        page_text = page.extract_text()
+                    except (IndexError, Exception) as e:
+                        logger.warning("pdf_page_extract_error", page=page_num, error=str(e))
+                        try:
+                            # Fallback to simple extraction which is more robust against layout errors
+                            page_text = page.extract_text_simple()
+                        except Exception as e2:
+                            logger.error("pdf_page_extract_failed_completely", page=page_num, error=str(e2))
+                            page_text = ""
+
                     if page_text:
                         text.append(page_text)
                     
@@ -364,9 +376,6 @@ class ResumeParser:
         # Keep alias for downstream consumers that still read `experience`.
         cleaned["experience"] = cleaned["work_experience"]
         
-        return cleaned
-
-
         return cleaned
 
 

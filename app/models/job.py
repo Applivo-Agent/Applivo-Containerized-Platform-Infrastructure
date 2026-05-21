@@ -86,8 +86,8 @@ class Job(Base, UUIDMixin, TimestampMixin):
     """
     __tablename__ = "jobs"
     __table_args__ = (
-        # Prevent duplicate jobs from same source PER USER
-        UniqueConstraint("source", "source_job_id", "user_id", name="uq_job_source_user"),
+        # Prevent duplicate jobs from same source
+        UniqueConstraint("source", "source_job_id", name="uq_job_source"),
     )
 
     # ── Owner ─────────────────────────────────────────────────
@@ -146,7 +146,7 @@ class Job(Base, UUIDMixin, TimestampMixin):
 
     # ── Pipeline Status ───────────────────────────────────────
     status: Mapped[JobStatus] = mapped_column(
-        Enum(JobStatus, name="jobstatus"), default=JobStatus.NEW, nullable=False, index=True
+        String(20), default=JobStatus.NEW.value, nullable=False, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 

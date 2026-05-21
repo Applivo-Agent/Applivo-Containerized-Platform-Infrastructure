@@ -158,7 +158,7 @@ class Application(Base, UUIDMixin, TimestampMixin):
     )
 
     def __repr__(self) -> str:
-        return f"<Application {self.company_snapshot} - {self.job_title_snapshot} [{self.status}]>"
+        return f"<Application id={self.id} status={self.status}>"
 
 
 class ApplicationEvent(Base, UUIDMixin, TimestampMixin):

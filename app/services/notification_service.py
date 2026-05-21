@@ -351,45 +351,78 @@ class NotificationService:
 
     async def send_daily_digest(self) -> dict:
         """
-        Send daily summary: jobs found, applications sent, status changes.
+        Send daily summary per user: jobs found, applications sent, top matches.
+        Only sent to users with an active subscription.
         Called by Celery beat daily.
         """
         from app.models.job import Job, JobAnalysis
         from app.models.application import Application
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
 
         async with get_db_context() as db:
             today = datetime.now(timezone.utc).date()
 
-            jobs_today = (await db.execute(
-                select(func.count(Job.id)).where(
-                    func.date(Job.scraped_at) == today
+            # Only notify users who have an ACTIVE subscription
+            result = await db.execute(
+                select(User.id)
+                .join(Subscription, Subscription.user_id == User.id)
+                .where(
+                    User.is_active == True,
+                    Subscription.status == SubscriptionStatus.ACTIVE,
                 )
-            )).scalar() or 0
+                .distinct()
+            )
+            user_ids = [row[0] for row in result.fetchall()]
 
-            apps_today = (await db.execute(
-                select(func.count(Application.id)).where(
-                    func.date(Application.applied_at) == today
-                )
-            )).scalar() or 0
+        if not user_ids:
+            logger.info("No active subscribers — skipping digest")
+            return {"sent": False, "reason": "No active subscribers"}
 
-            top_jobs = (await db.execute(
-                select(Job.title, Job.company_name, JobAnalysis.match_score)
-                .join(JobAnalysis, Job.id == JobAnalysis.job_id)
-                .where(func.date(Job.scraped_at) == today)
-                .order_by(JobAnalysis.match_score.desc())
-                .limit(5)
-            )).all()
+        sent_count = 0
+        for uid in user_ids:
+            try:
+                async with get_db_context() as db:
+                    today = datetime.now(timezone.utc).date()
 
-        if not jobs_today and not apps_today:
-            logger.info("No activity today — skipping digest")
-            return {"sent": False, "reason": "No activity"}
+                    # Per-user: count jobs scraped today (global pool)
+                    jobs_today = (await db.execute(
+                        select(func.count(Job.id)).where(
+                            func.date(Job.scraped_at) == today
+                        )
+                    )).scalar() or 0
 
-        job_lines = "\n".join(
-            f"• {j.company_name} — {j.title} ({j.match_score:.0f}% match)"
-            for j in top_jobs
-        ) or "No new jobs today."
+                    # Per-user: count their own applications sent today
+                    apps_today = (await db.execute(
+                        select(func.count(Application.id)).where(
+                            Application.user_id == uid,
+                            func.date(Application.applied_at) == today,
+                        )
+                    )).scalar() or 0
 
-        body = f"""📊 Your Daily Career Update
+                    # Per-user: top matching jobs from their own analyses
+                    top_jobs = (await db.execute(
+                        select(Job.title, Job.company_name, JobAnalysis.match_score)
+                        .join(JobAnalysis, Job.id == JobAnalysis.job_id)
+                        .where(
+                            JobAnalysis.user_id == uid,
+                            func.date(Job.scraped_at) == today,
+                            JobAnalysis.match_score.isnot(None),
+                        )
+                        .order_by(JobAnalysis.match_score.desc())
+                        .limit(5)
+                    )).all()
+
+                if not jobs_today and not apps_today:
+                    logger.info("No activity today for user — skipping digest", user_id=uid)
+                    continue
+
+                job_lines = "\n".join(
+                    f"• {j.company_name} — {j.title} ({j.match_score:.0f}% match)"
+                    for j in top_jobs
+                ) or "No top matches yet — check back tomorrow!"
+
+                body = f"""📊 Your Daily Career Update
 
 Jobs Found Today: {jobs_today}
 Applications Sent: {apps_today}
@@ -401,14 +434,6 @@ Keep up the great work! Your next opportunity is just around the corner.
 
 — Applivo AI"""
 
-        async with get_db_context() as db:
-            from app.models.user import User
-            result = await db.execute(select(User.id).where(User.is_active == True))
-            user_ids = [row[0] for row in result.fetchall()]
-
-        sent_count = 0
-        for uid in user_ids:
-            try:
                 await self.notify(
                     title="Daily Career Update",
                     body=body,
@@ -420,4 +445,4 @@ Keep up the great work! Your next opportunity is just around the corner.
             except Exception as e:
                 logger.error("Failed to send digest to user", user_id=uid, error=str(e))
 
-        return {"sent": True, "jobs_today": jobs_today, "apps_today": apps_today, "users_notified": sent_count}
+        return {"sent": True, "users_notified": sent_count}

@@ -38,7 +38,10 @@ class SubscriptionService:
                 select(Subscription)
                 .where(
                     Subscription.user_id == user_id,
-                    func.lower(Subscription.status.cast(String)) == SubscriptionStatus.ACTIVE.value,
+                    func.lower(Subscription.status.cast(String)).in_([
+                        SubscriptionStatus.ACTIVE.value.lower(),
+                        "success"
+                    ])
                 )
                 .order_by(Subscription.created_at.desc())
                 .limit(1)

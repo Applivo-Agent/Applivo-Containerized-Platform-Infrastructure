@@ -16,8 +16,11 @@ celery_app = Celery(
     "app",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    include=["app.celery_tasks"],
 )
 
+# Keep autodiscovery for conventional task modules while explicitly including
+# app.celery_tasks where this project defines all Celery tasks.
 celery_app.autodiscover_tasks(["app"])
 
 celery_app.conf.update(
@@ -31,12 +34,14 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_reject_on_worker_lost=True,
     task_acks_on_failure_or_timeout=False,
+    broker_connection_retry_on_startup=True,
     beat_schedule_filename="/tmp/celerybeat-schedule",
     task_default_queue="default",
     task_routes={
         "app.celery_tasks.scrape_jobs": {"queue": "scraping"},
         "app.celery_tasks.analyze_jobs": {"queue": "analysis"},
         "app.celery_tasks.auto_apply": {"queue": "apply"},
+        "app.celery_tasks.apply_queued_batch": {"queue": "apply"},
         "app.celery_tasks.send_notification": {"queue": "notifications"},
         "app.celery_tasks.check_emails": {"queue": "email_monitor"},
         "app.celery_tasks.send_daily_digest": {"queue": "notifications"},

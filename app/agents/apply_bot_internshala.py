@@ -17,12 +17,13 @@ FIXES in this version vs document-6:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import random
 import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -32,72 +33,627 @@ logger = structlog.get_logger()
 from app.core.config import settings as _path_settings
 COOKIE_FILE = _path_settings.storage_path / "internshala_cookies.json"
 SCREENSHOT_DIR = _path_settings.storage_path / "screenshots"
+ANSWER_CACHE_FILE = _path_settings.storage_path / "internshala_answer_cache.json"
+
+BAD_PATTERNS = (
+    "we are excited",
+    "our company",
+    "our organization",
+    "dear hiring manager",
+    "as a company",
+    "[your_email@example.com]",
+    "your_email@example.com",
+    "we invite candidates",
+)
+
+IDENTITY_FIELD_KEYS = (
+    ("first name", "first_name"),
+    ("firstname", "first_name"),
+    ("given name", "first_name"),
+    ("last name", "last_name"),
+    ("lastname", "last_name"),
+    ("surname", "last_name"),
+    ("family name", "last_name"),
+    ("full name", "full_name"),
+    ("name", "full_name"),
+    ("email", "email"),
+    ("phone", "phone"),
+    ("mobile", "phone"),
+    ("linkedin", "linkedin_url"),
+    ("github", "github_url"),
+    ("portfolio", "portfolio_url"),
+    ("college", "college"),
+    ("university", "college"),
+    ("school", "college"),
+    ("city", "city"),
+    ("location", "city"),
+)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  AI SCREENING ANSWER
-# ─────────────────────────────────────────────────────────────────────────────
+def _normalize_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
 
-async def _ai_answer(question: str, options: list, profile_summary: str, job_context: str = "") -> str:
+
+def _truncate(value: Any, limit: int = 140) -> str:
+    text = _normalize_text(value)
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _profile_name(profile: Any, user_full_name: Optional[str] = None) -> str:
+    candidates = [
+        user_full_name,
+        getattr(profile, "full_name", None),
+        getattr(profile, "name", None),
+    ]
+    for candidate in candidates:
+        cleaned = _normalize_text(candidate)
+        if cleaned:
+            return cleaned
+
+    first = _normalize_text(getattr(profile, "first_name", ""))
+    last = _normalize_text(getattr(profile, "last_name", ""))
+    combined = _normalize_text(f"{first} {last}")
+    return combined or "Candidate"
+
+
+def _safe_attr(profile: Any, *names: str, default: str = "") -> str:
+    for name in names:
+        value = getattr(profile, name, None)
+        cleaned = _normalize_text(value)
+        if cleaned:
+            return cleaned
+    return default
+
+
+def _configured_account_email(settings_obj: Any) -> str:
+    """Return the best configured account email for Internshala flows.
+
+    Prefer the site-specific login email, but fall back to the generic user
+    email if that is the only populated value. Placeholder values are ignored.
     """
-    Ask Groq to answer a screening question.
-    - options non-empty → pick the best option (dropdown/radio/select).
-    - options empty     → write a short professional free-text answer.
-    job_context: extra job-specific info (title, required skills, description excerpt).
-    Falls back gracefully on any error.
-    """
-    try:
-        from openai import AsyncOpenAI
-        from app.core.config import settings
+    placeholder_values = {
+        "",
+        "your_email@example.com",
+        "[your_email@example.com]",
+    }
+    for attr in ("INTERNShALA_EMAIL", "USER_EMAIL"):
+        cleaned = _safe_attr(settings_obj, attr, default="")
+        if cleaned and cleaned.lower() not in placeholder_values:
+            return cleaned
+    return _safe_attr(settings_obj, "INTERNShALA_EMAIL", "USER_EMAIL", default="")
 
-        client = AsyncOpenAI(
-            api_key=settings.ai_api_key,      # uses GROQ_API_KEY if set, else OPENAI_API_KEY
-            base_url="https://api.groq.com/openai/v1",
-        )
 
-        if options:
-            opts_text = "\n".join(f"  - {o}" for o in options)
-            job_ctx_line = f"Job context:\n{job_context}\n\n" if job_context else ""
-            prompt = (
-                f"You are filling a job application form for a candidate.\n\n"
-                f"Candidate profile summary:\n{profile_summary}\n\n"
-                f"{job_ctx_line}"
-                f"Question: {question}\n\n"
-                f"Available options:\n{opts_text}\n\n"
-                f"Reply with ONLY the exact text of the best option — nothing else."
-            )
+def _extract_sequence_text(items: Any, limit: int = 5) -> List[str]:
+    results: List[str] = []
+    if not items:
+        return results
+    for item in list(items)[:limit]:
+        if isinstance(item, str):
+            cleaned = _normalize_text(item)
+            if cleaned:
+                results.append(cleaned)
+            continue
+        if isinstance(item, dict):
+            pieces = []
+            for key in ("name", "title", "institution", "company", "degree", "field", "description", "summary"):
+                if item.get(key):
+                    pieces.append(_normalize_text(item.get(key)))
+            tech = item.get("tech_stack") or item.get("skills") or item.get("bullets")
+            if isinstance(tech, list):
+                pieces.extend(_normalize_text(t) for t in tech[:5] if _normalize_text(t))
+            text = _normalize_text(" | ".join(pieces))
+            if text:
+                results.append(text)
+    return results
+
+
+def _resume_text(resume: Any) -> str:
+    if not resume:
+        return ""
+    pieces: List[str] = []
+    for attr in ("content_markdown", "content_text"):
+        value = getattr(resume, attr, None)
+        if value:
+            pieces.append(_normalize_text(value))
+    content_json = getattr(resume, "content_json", None)
+    if isinstance(content_json, dict):
+        pieces.append(_normalize_text(json.dumps(content_json, ensure_ascii=False)))
+    elif isinstance(content_json, list):
+        pieces.append(_normalize_text(json.dumps(content_json, ensure_ascii=False)))
+    return "\n".join(pieces)
+
+
+def _resume_chunks(text: str, chunk_size: int = 700) -> List[str]:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return []
+    words = cleaned.split()
+    chunks = []
+    for start in range(0, len(words), chunk_size):
+        chunk = " ".join(words[start:start + chunk_size]).strip()
+        if chunk:
+            chunks.append(chunk)
+    return chunks[:8]
+
+
+def _retrieve_relevant_chunks(question: str, candidate_context: Dict[str, Any], max_chunks: int = 3) -> List[str]:
+    tokens = [token for token in re.findall(r"[a-z0-9+#.-]+", question.lower()) if len(token) > 2]
+    sources: List[str] = []
+    sources.extend(_extract_sequence_text(candidate_context.get("projects"), limit=8))
+    sources.extend(_extract_sequence_text(candidate_context.get("experience"), limit=8))
+    sources.extend(_extract_sequence_text(candidate_context.get("education"), limit=5))
+    sources.extend(_extract_sequence_text(candidate_context.get("skills"), limit=12))
+    sources.extend(_resume_chunks(candidate_context.get("resume_text", ""), chunk_size=180))
+
+    scored: List[Tuple[int, str]] = []
+    for source in sources:
+        lower = source.lower()
+        score = sum(1 for token in tokens if token in lower)
+        if score:
+            scored.append((score, source))
+
+    if not scored:
+        return sources[:max_chunks]
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected = []
+    for _, chunk in scored:
+        if chunk not in selected:
+            selected.append(chunk)
+        if len(selected) >= max_chunks:
+            break
+    return selected
+
+
+def _build_candidate_context(profile: Any, resume: Any, job: Any, question: str = "") -> Dict[str, Any]:
+    education = getattr(profile, "education", None) or []
+    projects = getattr(profile, "projects", None) or []
+    experience = getattr(profile, "work_experience", None) or []
+    certifications = getattr(profile, "certifications", None) or []
+    awards = getattr(profile, "awards", None) or []
+    publications = getattr(profile, "publications", None) or []
+    skills = []
+    raw_skills = getattr(profile, "skills", None) or []
+    for skill in raw_skills:
+        if isinstance(skill, str):
+            skills.append(skill)
         else:
-            job_ctx_line = f"Job context:\n{job_context}\n\n" if job_context else ""
-            prompt = (
-                f"You are filling a job application form for a candidate.\n\n"
-                f"Candidate profile summary:\n{profile_summary}\n\n"
-                f"{job_ctx_line}"
-                f"Question: {question}\n\n"
-                f"Write a concise, enthusiastic, professional answer (2-4 sentences). "
-                f"Be specific about the candidate's actual skills matching the job. "
-                f"Never use placeholder text like [specific skills] — use real skill names from the profile. "
-                f"If asked for links or URLs and none are available, say 'Available upon request'. "
-                f"If asked for a number (e.g. years of experience), reply with just the number."
-            )
+            name = getattr(skill, "name", None) or (skill.get("name") if isinstance(skill, dict) else None)
+            if name:
+                skills.append(name)
 
-        resp = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL_LIGHT,
-            max_tokens=150,
-            temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = (resp.choices[0].message.content or "").strip().strip('"').strip("'")
-        logger.info("AI answered screening question",
-                    question=question[:80], answer=answer[:80])
-        return answer
+    return {
+        "name": _profile_name(profile),
+        "location": _safe_attr(profile, "location", default=""),
+        "education": education,
+        "skills": skills,
+        "projects": projects,
+        "experience": experience,
+        "certifications": certifications,
+        "awards": awards,
+        "publications": publications,
+        "resume_text": _resume_text(resume),
+        "job_title": getattr(job, "title", "") or "",
+        "job_company": getattr(job, "company_name", "") or "",
+        "job_description": (getattr(job, "description_clean", None) or getattr(job, "description_raw", None) or "")[:3500],
+        "question": question,
+    }
+
+
+def _render_candidate_context(candidate_context: Dict[str, Any], relevant_chunks: List[str]) -> str:
+    payload = dict(candidate_context)
+    payload["relevant_resume_chunks"] = relevant_chunks
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def classify_question(question: str) -> str:
+    q = _normalize_text(question).lower()
+    if not q:
+        return "generic"
+    if "who can apply" in q or "eligible" in q or "eligibility" in q:
+        return "eligibility"
+    if "why should we hire" in q or "why hire" in q or "why should i hire" in q:
+        return "why_hire_you"
+    if "available" in q or "joining" in q or "notice period" in q or "immediately" in q:
+        return "availability"
+    if "salary" in q or "stipend" in q or "compensation" in q or "expected pay" in q:
+        return "salary"
+    if "relocat" in q or "move to" in q or "shift" in q:
+        return "relocation"
+    if "experience" in q or "worked on" in q or "background" in q or "internship" in q:
+        return "experience"
+    if "skill" in q or "technolog" in q or "tool" in q or "stack" in q:
+        return "skills"
+    if "project" in q or "built" in q or "portfolio" in q or "github" in q:
+        return "project_based"
+    if "education" in q or "college" in q or "university" in q or "school" in q or "degree" in q:
+        return "education"
+    if "ai" in q or "llm" in q or "machine learning" in q or "ml" in q:
+        return "ai_knowledge"
+    if any(word in q for word in ("strength", "tell us about yourself", "introduce yourself")):
+        return "strengths"
+    return "generic"
+
+
+def _identity_field_value(label: str, profile: Any, user_full_name: Optional[str] = None, settings_obj: Any = None) -> Optional[str]:
+    label_lower = _normalize_text(label).lower()
+    if not label_lower:
+        return None
+    if "username" in label_lower:
+        return None
+
+    for key, attr in IDENTITY_FIELD_KEYS:
+        if key in label_lower:
+            if attr == "email":
+                value = _configured_account_email(settings_obj) if settings_obj else ""
+            elif attr == "phone":
+                value = _safe_attr(profile, "phone", default="")
+            elif attr == "full_name":
+                value = _profile_name(profile, user_full_name=user_full_name)
+            elif attr == "first_name":
+                full_name = _profile_name(profile, user_full_name=user_full_name)
+                value = full_name.split()[0] if full_name else ""
+            elif attr == "last_name":
+                full_name = _profile_name(profile, user_full_name=user_full_name)
+                value = full_name.split()[-1] if full_name and len(full_name.split()) > 1 else ""
+            elif attr == "college":
+                education_text = _extract_sequence_text(getattr(profile, "education", None), limit=1)
+                value = education_text[0] if education_text else ""
+            elif attr == "city":
+                value = _safe_attr(profile, "location", default="")
+            else:
+                value = _safe_attr(profile, attr, default="")
+
+            cleaned = _normalize_text(value)
+            if cleaned:
+                return cleaned
+    return None
+
+
+def _question_cache_key(question: str, category: str, candidate_context: Dict[str, Any], options: List[str]) -> str:
+    basis = json.dumps(
+        {
+            "question": _normalize_text(question).lower(),
+            "category": category,
+            "name": candidate_context.get("name", ""),
+            "job_title": candidate_context.get("job_title", ""),
+            "options": options,
+            "projects": candidate_context.get("projects", []),
+            "skills": candidate_context.get("skills", []),
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()
+
+
+def _load_answer_memory() -> Dict[str, Any]:
+    try:
+        if ANSWER_CACHE_FILE.exists():
+            return json.loads(ANSWER_CACHE_FILE.read_text())
     except Exception as e:
-        logger.warning("AI screening answer failed, using fallback", error=str(e))
-        if options:
-            return options[len(options) // 2]
-        return (
-            "I am a motivated and quick learner with relevant experience in this domain. "
-            "I am eager to contribute my skills and grow professionally through this opportunity."
+        logger.warning("Could not load answer memory", error=str(e))
+    return {}
+
+
+def _save_answer_memory(memory: Dict[str, Any]) -> None:
+    try:
+        ANSWER_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # keep the cache small and recent
+        if len(memory) > 250:
+            items = list(memory.items())[-200:]
+            memory = dict(items)
+        ANSWER_CACHE_FILE.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
+    except Exception as e:
+        logger.warning("Could not save answer memory", error=str(e))
+
+
+def _validate_answer(answer: str, category: str, max_words: int = 120) -> Tuple[bool, str]:
+    text = _normalize_text(answer)
+    if not text:
+        return False, "empty"
+    lower = text.lower()
+    if any(pattern in lower for pattern in BAD_PATTERNS):
+        return False, "blacklisted_phrase"
+    if "mailto:" in lower or re.search(r"\b\d{10,}\b", lower):
+        return False, "looks_like_placeholder_or_phone"
+    if lower.startswith("we ") or lower.startswith("our "):
+        return False, "recruiter_voice"
+    if category in ("availability", "salary") and len(text.split()) > 25:
+        return False, "too_verbose_for_fact_field"
+    if len(text.split()) > max_words:
+        return False, "too_long"
+    return True, "ok"
+
+
+def _fallback_answer(category: str, candidate_context: Dict[str, Any], question: str) -> str:
+    name = candidate_context.get("name", "I")
+    skills = candidate_context.get("skills", []) or []
+    projects = candidate_context.get("projects", []) or []
+    project_names = []
+    for project in projects:
+        if isinstance(project, dict):
+            project_names.append(_normalize_text(project.get("name") or project.get("title") or ""))
+    project_names = [p for p in project_names if p][:3]
+    skill_text = ", ".join(_normalize_text(s) for s in skills[:5] if _normalize_text(s))
+
+    if category == "eligibility":
+        return f"I am a motivated candidate with experience in {skill_text or 'relevant technical skills'} and projects like {', '.join(project_names) or 'my recent work'}."
+    if category == "why_hire_you":
+        return f"I bring hands-on experience in {skill_text or 'relevant tools'}, a strong learning mindset, and projects such as {', '.join(project_names) or 'my recent projects'} that align with this role."
+    if category == "experience":
+        return f"I have worked on projects such as {', '.join(project_names) or 'recent academic projects'} and used {skill_text or 'relevant technologies'} to build practical solutions."
+    if category == "skills":
+        return f"My core skills include {skill_text or 'relevant technical skills'} and I have applied them in projects like {', '.join(project_names) or 'my recent projects'}."
+    if category == "availability":
+        return "I am available as required and can join immediately if selected."
+    if category == "salary":
+        return "I am open to the internship's standard stipend range and value the learning opportunity."
+    if category == "education":
+        education = candidate_context.get("education", []) or []
+        if education:
+            edu = education[0] if isinstance(education[0], dict) else {}
+            degree = _normalize_text(edu.get("degree") or edu.get("name") or "")
+            institution = _normalize_text(edu.get("institution") or edu.get("college") or "")
+            if degree or institution:
+                return f"I am pursuing {degree or 'my degree'} at {institution or 'my institution'} and have focused on building practical technical skills alongside coursework."
+        return "I am currently focused on my education while building practical technical skills through projects and hands-on learning."
+    if category == "project_based":
+        return f"My project work includes {', '.join(project_names) or 'recent technical projects'}, where I applied {skill_text or 'core technical skills'} to solve practical problems."
+    if category == "ai_knowledge":
+        return f"I have practical exposure to {skill_text or 'AI/ML tools'} through projects such as {', '.join(project_names) or 'recent AI projects'}."
+    return f"I am a motivated candidate with hands-on experience in {skill_text or 'relevant technical skills'} and projects like {', '.join(project_names) or 'my recent work'}."
+
+
+async def _generate_candidate_answer(
+    question: str,
+    options: List[str],
+    profile: Any,
+    resume: Any,
+    job: Any,
+    settings_obj: Any,
+    user_id: Optional[str] = None,
+    user_full_name: Optional[str] = None,
+) -> str:
+    category = classify_question(question)
+    candidate_context = _build_candidate_context(profile, resume, job, question=question)
+    relevant_chunks = _retrieve_relevant_chunks(question, candidate_context)
+    cache_key = _question_cache_key(question, category, candidate_context, options)
+    answer_memory = _load_answer_memory()
+
+    cached = answer_memory.get(cache_key)
+    if cached and _validate_answer(cached.get("answer", ""), category)[0]:
+        logger.info("Using cached screening answer", category=category, question=_truncate(question, 80))
+        return cached["answer"]
+
+    from app.services.ai_router import ai_router
+    from app.core.config import settings
+
+    context_text = _render_candidate_context(candidate_context, relevant_chunks)
+    question_text = _normalize_text(question)
+
+    prompts: List[str] = []
+    if options:
+        option_lines = "\n".join(f"- {opt}" for opt in options)
+        prompts.append(
+            f"You are the internship applicant.\n\n"
+            f"Answer in first person only. Choose exactly one option that best fits the candidate.\n"
+            f"Do not add explanation. Do not sound like a recruiter.\n\n"
+            f"Question type: {category}\n"
+            f"Candidate context:\n{context_text}\n\n"
+            f"Question:\n{question_text}\n\n"
+            f"Options:\n{option_lines}\n"
+            f"Reply with only the exact option text."
         )
+    else:
+        prompt_templates = {
+            "eligibility": (
+                "You are answering as the internship applicant.\n\n"
+                "Write a short eligibility response.\n\n"
+                "Rules:\n"
+                "- Answer in first person.\n"
+                "- Mention relevant skills.\n"
+                "- Mention relevant projects if applicable.\n"
+                "- Keep under 80 words.\n"
+                "- Sound human.\n"
+                "- Never answer like a recruiter.\n"
+                "- Never use phrases like 'We are excited', 'Our company', or 'We invite candidates'.\n\n"
+                "Candidate Profile:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "experience": (
+                "You are answering as the applicant.\n\n"
+                "Write a concise professional answer about experience.\n\n"
+                "Requirements:\n"
+                "- Mention real projects from the resume.\n"
+                "- Mention actual technologies.\n"
+                "- Mention measurable impact if available.\n"
+                "- Do not invent fake experience.\n"
+                "- Use first person.\n"
+                "- Keep under 120 words.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "why_hire_you": (
+                "You are the candidate applying for an internship.\n\n"
+                "Write a confident but natural answer explaining why the candidate is a strong fit.\n\n"
+                "Requirements:\n"
+                "- Mention relevant technical strengths.\n"
+                "- Mention adaptability and learning ability.\n"
+                "- Mention projects aligned with the role.\n"
+                "- Avoid arrogance.\n"
+                "- Avoid generic AI phrases.\n"
+                "- Sound like a real student/candidate.\n"
+                "- Keep under 100 words.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "availability": (
+                "You are the candidate. Answer briefly and naturally about availability or notice period.\n\n"
+                "Keep it under 25 words. Use first person. Do not sound generic.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "skills": (
+                "You are the candidate. Answer with concrete skills from the profile and resume.\n\n"
+                "Keep it under 100 words, first person, and avoid recruiter language.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "project_based": (
+                "You are the candidate. Mention only real projects and technologies from the context.\n\n"
+                "Keep it under 110 words. First person. Human and specific.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "education": (
+                "You are the candidate. Answer briefly about education, degree, institution, or coursework.\n\n"
+                "Keep it under 80 words. First person.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "ai_knowledge": (
+                "You are the candidate. Answer specifically about AI / ML / LLM experience from the provided projects and skills.\n\n"
+                "Keep it under 110 words. First person. No recruiter voice.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "salary": (
+                "You are the candidate. Answer about stipend or compensation briefly and professionally.\n\n"
+                "Keep it under 25 words. First person.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "relocation": (
+                "You are the candidate. Answer clearly about relocation, location preference, or remote work.\n\n"
+                "Keep it under 30 words. First person.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "strengths": (
+                "You are the candidate. Answer naturally about strengths, fit, and learning ability.\n\n"
+                "Keep it under 100 words. First person.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+            "generic": (
+                "You are answering as the internship applicant.\n\n"
+                "Write a short, candidate-grounded answer in first person. Use only facts from the profile/resume context.\n"
+                "Keep it natural, concise, and under 100 words. Never sound like a recruiter.\n\n"
+                "Candidate Context:\n{context}\n\nQuestion:\n{question}"
+            ),
+        }
+        prompts.append(prompt_templates.get(category, prompt_templates["generic"]).format(context=context_text, question=question_text))
+
+    prompts.append(
+        f"You are the internship applicant. Write in first person. Use only facts from the candidate context.\n"
+        f"Avoid recruiter language such as 'we are excited' or 'our company'.\n"
+        f"Do not invent experiences, projects, or credentials.\n\n"
+        f"Candidate context:\n{context_text}\n\nQuestion:\n{question_text}\n"
+        f"Options: {options if options else 'N/A'}"
+    )
+
+    last_result = ""
+    for attempt, prompt in enumerate(prompts[:2], start=1):
+        resp = await ai_router.chat_completions_create(
+            model=settings.OPENAI_MODEL_LIGHT,
+            max_tokens=180,
+            temperature=0.25 if not options else 0.15,
+            messages=[{"role": "user", "content": prompt}],
+            user_id=user_id,
+            endpoint="/api/agent/internshala/answer",
+        )
+        answer = _normalize_text(resp.get("content", "")).strip('"').strip("'")
+        last_result = answer
+
+        if options:
+            selected = None
+            for option in options:
+                if answer.lower() == option.lower() or answer.lower() in option.lower() or option.lower() in answer.lower():
+                    selected = option
+                    break
+            if not selected and options:
+                selected = options[0]
+            answer = selected or answer
+
+        valid, reason = _validate_answer(answer, category)
+        logger.info(
+            "Screening answer generated",
+            question=_truncate(question, 80),
+            category=category,
+            attempt=attempt,
+            valid=valid,
+            validation_reason=reason,
+            answer=_truncate(answer, 160),
+        )
+        if valid:
+            answer_memory[cache_key] = {
+                "answer": answer,
+                "category": category,
+                "question": question,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _save_answer_memory(answer_memory)
+            return answer
+
+    fallback = _fallback_answer(category, candidate_context, question)
+    if options:
+        for option in options:
+            if fallback.lower() == option.lower() or fallback.lower() in option.lower():
+                fallback = option
+                break
+    logger.warning(
+        "Using fallback screening answer",
+        question=_truncate(question, 80),
+        category=category,
+        generated=_truncate(last_result, 120),
+        fallback=_truncate(fallback, 120),
+    )
+    answer_memory[cache_key] = {
+        "answer": fallback,
+        "category": category,
+        "question": question,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_answer_memory(answer_memory)
+    return fallback
+
+
+async def _ai_answer(
+    question: str,
+    options: list,
+    profile_summary: str,
+    job_context: str = "",
+    user_id: str = None,
+    profile: Any = None,
+    resume: Any = None,
+    job: Any = None,
+    settings_obj: Any = None,
+    user_full_name: Optional[str] = None,
+) -> str:
+    """Backward-compatible wrapper for candidate-grounded answer generation."""
+    if profile is None:
+        class _ProfileProxy:
+            pass
+        profile = _ProfileProxy()
+        setattr(profile, "professional_summary", profile_summary)
+        setattr(profile, "desired_roles", [])
+        setattr(profile, "projects", [])
+        setattr(profile, "work_experience", [])
+        setattr(profile, "education", [])
+        setattr(profile, "skills", [])
+        setattr(profile, "certifications", [])
+        setattr(profile, "awards", [])
+        setattr(profile, "publications", [])
+        setattr(profile, "location", "")
+        setattr(profile, "github_url", "")
+        setattr(profile, "portfolio_url", "")
+        setattr(profile, "linkedin_url", "")
+
+    # Respect direct identity mapping before any AI call.
+    direct = _identity_field_value(question, profile, user_full_name=user_full_name, settings_obj=settings_obj)
+    if direct:
+        return direct
+
+    return await _generate_candidate_answer(
+        question=question,
+        options=list(options or []),
+        profile=profile,
+        resume=resume,
+        job=job,
+        settings_obj=settings_obj,
+        user_id=user_id,
+        user_full_name=user_full_name,
+    )
 
 
 def _build_profile_summary(profile, job=None) -> str:
@@ -143,6 +699,10 @@ async def _human_type(element, text: str) -> None:
         await element.type(char, delay=random.uniform(40, 130))
         if random.random() < 0.05:
             await asyncio.sleep(random.uniform(0.1, 0.3))
+    try:
+        await element.press("Tab")
+    except Exception:
+        pass
 
 
 def _load_cookies() -> list:
@@ -214,6 +774,26 @@ async def _wait_for_captcha_resolution(page, timeout_s: int = 120) -> bool:
     return False
 
 
+async def _goto_lenient(page, url: str, timeout_ms: int = 60000) -> None:
+    """Navigate without failing the whole batch on a slow page load.
+
+    We use a low-friction navigation and then give the page a short chance to
+    settle. This keeps slow proxy loads from aborting otherwise valid runs.
+    """
+    try:
+        await page.goto(url, wait_until="commit", timeout=timeout_ms)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=min(15000, timeout_ms))
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("Navigation issue; continuing with current page", url=url, error=str(exc), timeout_ms=timeout_ms)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except Exception:
+            pass
+
+
 async def _is_logged_in(page) -> bool:
     try:
         # First check URL - most reliable indicator
@@ -227,13 +807,13 @@ async def _is_logged_in(page) -> bool:
             ".profile-header", "#header-profile-img",
             "a[href*='/student/dashboard']", "a[href*='/student/profile']",
             ".student-profile-pic", ".logged-in-header",
-            # Additional selectors for current Internshala
             "a[href*='/student/']", ".user-profile",
             ".nav-item.profile", ".profile-dropdown",
             "img[alt*='profile' i]", ".avatar",
-            # Check for logout link
             "a:has-text('Logout')", "a:has-text('Sign Out')",
             "a[href*='logout']", "a[href*='signout']",
+            # Internshala specific
+            ".nav-link:has-text('Internships')", ".nav-link:has-text('Jobs')",
         ]
         for sel in selectors:
             try:
@@ -244,20 +824,31 @@ async def _is_logged_in(page) -> bool:
             except Exception:
                 continue
         
-        # Also check page content for logged-in indicators
+        # Check for security walls that aren't "Login" but prevent access
         content = await page.content()
-        if "logout" in content.lower() or "sign out" in content.lower():
-            logger.debug("_is_logged_in found 'logout' in content")
-            return True
-        if "/student/" in content:
-            logger.debug("_is_logged_in found /student/ in content")
-            return True
-            
-        logger.debug("_is_logged_in returning False")
+        content_lower = content.lower()
+        if "cloudflare" in content_lower or "verify you are human" in content_lower or "captcha" in content_lower:
+            logger.warning("Security check detected during login check")
+            return False
+
+        # If none of the above specific selectors or keywords were found, we are likely not logged in
+        logger.debug("_is_logged_in returning False", url=url)
         return False
     except Exception as e:
         logger.debug("_is_logged_in exception", error=str(e))
         return False
+
+
+async def _take_failure_screenshot(page, name: str):
+    """Utility to capture what went wrong visually."""
+    try:
+        from app.core.config import settings
+        path = settings.storage_path / "recordings" / f"failure_{name}_{int(datetime.now().timestamp())}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(path))
+        logger.info(f"📸 Failure screenshot saved", path=str(path))
+    except Exception as e:
+        logger.warning(f"Failed to take failure screenshot: {e}")
 
 
 async def _is_on_login_wall(page) -> bool:
@@ -265,10 +856,8 @@ async def _is_on_login_wall(page) -> bool:
     if "/login" in url or "/signup" in url:
         return True
     try:
-        el = await page.query_selector(
-            "#login-modal input[type='email'], .modal input[type='email'], .login-modal"
-        )
-        return el is not None
+        pw = await page.query_selector("input[type='password'], #login-modal input[type='password']")
+        return pw is not None
     except Exception:
         return False
 
@@ -572,6 +1161,8 @@ async def _js_set_value(page, el_handle, value: str) -> None:
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
             el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
+            el.dispatchEvent(new Event('focusout', {bubbles: true}));
+            el.dispatchEvent(new Event('blur', {bubbles: true}));
         }""",
         [el_handle, value],
     )
@@ -581,7 +1172,7 @@ async def _js_set_value(page, el_handle, value: str) -> None:
 #  FILL ALL FORM FIELDS  (visible AND hidden)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary: str, cover_answer: str, job_context: str = "") -> None:
+async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary: str, cover_answer: str, job_context: str = "", user_id: str = None, user_full_name: str = None, job: Any = None) -> None:
     """
     Fill every textarea, select, range, text input, and radio — including
     fields that are hidden/collapsed. Internshala validates all required fields
@@ -590,8 +1181,98 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
     fill() timeouts.
     """
 
+    async def _get_scope_handle():
+        for selector in (
+            ".modal.show form",
+            ".modal.show .modal-content form",
+            "#application_form",
+            ".application-modal form",
+            ".modal.show",
+            "form",
+        ):
+            handle = await page.query_selector(selector)
+            if handle:
+                try:
+                    if await handle.is_visible():
+                        return handle
+                except Exception:
+                    return handle
+        return page
+
+    async def _looks_like_login_modal() -> bool:
+        """Detect if modal is a login/auth form instead of an application form.
+        
+        Checks for:
+        1. Password field anywhere in the modal (even if hidden)
+        2. Login-related text in modal heading/instructions
+        3. First name + Last name + Password pattern (typical login form)
+        """
+        try:
+            # Check for password field - even if hidden (visible=false)
+            password_field = await page.query_selector(
+                ".modal.show input[type='password'], .modal.show input[name='password'], "
+                "#login-modal input[type='password'], #login-modal input[name='password'], "
+                ".modal input[type='password']"
+            )
+            if password_field:
+                logger.warning("Detected password field in modal - likely login form")
+                return True
+            
+            # Check for login-related text
+            login_modal = await page.query_selector("#login-modal, #signup-modal, #register-modal, .modal.show")
+            if login_modal:
+                modal_text = _normalize_text(await login_modal.inner_text()).lower()
+                if any(token in modal_text for token in ("sign in", "login", "forgot password", "register", "email address", "password")):
+                    logger.warning("Detected login-related text in modal")
+                    return True
+            
+            # Check for login form field pattern: email + password + first_name
+            has_email = await page.query_selector("input[type='email'], input[name='email']")
+            has_password = await page.query_selector("input[type='password'], input[name='password']")
+            has_first_name = await page.query_selector("input[name='first_name']")
+            has_g_recaptcha = await page.query_selector("textarea[name='g-recaptcha-response'], #g-recaptcha-response-100000")
+            
+            # If we find email+password+first_name+recaptcha, it's a login form
+            if has_email and has_password and has_first_name and has_g_recaptcha:
+                logger.warning("Detected login form pattern (email+password+first_name+recaptcha) instead of application form")
+                return True
+                
+        except Exception as e:
+            logger.warning("Error checking for login modal", error=str(e))
+            return False
+        return False
+
+    scope = await _get_scope_handle()
+
+    if await _looks_like_login_modal():
+        logger.error("Login modal opened instead of application form; aborting")
+        await _screenshot(page, "login_modal_instead_of_application_form")
+        raise ValueError("Login modal opened instead of application form - Internshala detected bot")
+
+    def _is_boilerplate_label(label: str) -> bool:
+        text = (label or "").strip().lower()
+        if not text:
+            return False
+        return any(
+            phrase in text
+            for phrase in (
+                "new to internshala",
+                "register (student / company)",
+                "sign in",
+                "login",
+                "forgot password",
+                "create account",
+                "already have an account",
+            )
+        )
+
+    async def _scope_query_all(selector: str):
+        if scope is page:
+            return await page.query_selector_all(selector)
+        return await scope.query_selector_all(selector)
+
     # ── Textareas (ALL — including hidden) ───────────────────────────────────
-    for ta in await page.query_selector_all("textarea"):
+    for ta in await _scope_query_all("textarea"):
         try:
             current = (await ta.input_value()).strip()
             if current:
@@ -600,8 +1281,23 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
             label = await _get_field_label(page, ta)
             logger.info("Textarea found", label=(label or "(no label)")[:80])
 
+            if _is_boilerplate_label(label):
+                logger.info("Skipping boilerplate textarea", label=(label or "(no label)")[:80])
+                continue
+
             if label:
-                answer = await _ai_answer(label, [], profile_summary, job_context=job_context)
+                answer = await _ai_answer(
+                    label,
+                    [],
+                    profile_summary,
+                    job_context=job_context,
+                    user_id=user_id,
+                    profile=profile,
+                    resume=resume,
+                    job=job,
+                    settings_obj=settings_obj,
+                    user_full_name=user_full_name,
+                )
             else:
                 answer = cover_answer
 
@@ -611,7 +1307,7 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
             logger.warning("Could not fill textarea", error=str(e))
 
     # ── SELECT dropdowns ──────────────────────────────────────────────────────
-    for sel_el in await page.query_selector_all("select"):
+    for sel_el in await _scope_query_all("select"):
         try:
             current_val = await sel_el.evaluate("function(el) { return el.value; }")
             if current_val and current_val not in ("", "0", "Select", "-- Select --"):
@@ -641,8 +1337,23 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
                 )
                 label = placeholder_opt["text"] if placeholder_opt else "Please select an option"
 
+            if _is_boilerplate_label(label):
+                logger.info("Skipping boilerplate select", label=(label or "(no label)")[:80])
+                continue
+
             logger.info("Select field", label=label[:80], options=option_texts)
-            chosen_text = await _ai_answer(label, option_texts, profile_summary, job_context=job_context)
+            chosen_text = await _ai_answer(
+                label,
+                option_texts,
+                profile_summary,
+                job_context=job_context,
+                user_id=user_id,
+                profile=profile,
+                resume=resume,
+                job=job,
+                settings_obj=settings_obj,
+                user_full_name=user_full_name,
+            )
 
             chosen_value = None
             for o in real_options:
@@ -672,16 +1383,30 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
             logger.warning("Could not fill select", error=str(e))
 
     # ── Range / number inputs ─────────────────────────────────────────────────
-    for inp in await page.query_selector_all("input[type='range'], input[type='number']"):
+    for inp in await _scope_query_all("input[type='range'], input[type='number']"):
         try:
             if (await inp.input_value()).strip():
                 continue
             label = await _get_field_label(page, inp)
+            if _is_boilerplate_label(label):
+                logger.info("Skipping boilerplate number field", label=(label or "(no label)")[:80])
+                continue
             mn = int(float(await inp.evaluate("function(el) { return el.min || '1'; }") or "1"))
             mx = int(float(await inp.evaluate("function(el) { return el.max || '5'; }") or "5"))
             step = int(float(await inp.evaluate("function(el) { return el.step || '1'; }") or "1"))
             opts = [str(v) for v in range(mn, mx + 1, step)]
-            chosen = await _ai_answer(label or "Rate your skill level (1=lowest)", opts, profile_summary, job_context=job_context)
+            chosen = await _ai_answer(
+                label or "Rate your skill level (1=lowest)",
+                opts,
+                profile_summary,
+                job_context=job_context,
+                user_id=user_id,
+                profile=profile,
+                resume=resume,
+                job=job,
+                settings_obj=settings_obj,
+                user_full_name=user_full_name,
+            )
             try:
                 cv = max(mn, min(mx, int(float(chosen))))
                 chosen = str(cv)
@@ -695,7 +1420,7 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
     # ── Custom text / url / email inputs ─────────────────────────────────────
     # FIX: Use _js_set_value instead of inp.fill() so hidden inputs don't
     # cause a 30-second Playwright timeout (fill() requires visibility).
-    for inp in await page.query_selector_all(
+    for inp in await _scope_query_all(
         "input[type='text'], input[type='url'], input[type='email']"
     ):
         try:
@@ -722,9 +1447,15 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
             if not label:
                 continue  # Can't fill without knowing what the field is asking
 
-            if inp_type_attr == "email":
-                from app.core.config import settings as _s
-                answer = _s.USER_EMAIL or ""
+            if _is_boilerplate_label(label):
+                logger.info("Skipping boilerplate text input", label=(label or "(no label)")[:80])
+                continue
+
+            direct_value = _identity_field_value(label, profile, user_full_name=user_full_name, settings_obj=settings_obj)
+            if direct_value:
+                answer = direct_value
+            elif inp_type_attr == "email":
+                answer = _configured_account_email(settings_obj)
             elif inp_type_attr == "url" or any(w in label.lower() for w in ("url", "link", "portfolio", "website")):
                 answer = (
                     getattr(profile, "portfolio_url", "") or
@@ -736,11 +1467,23 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
             elif "github" in label.lower():
                 answer = getattr(profile, "github_url", "") or "Available upon request"
             else:
-                answer = await _ai_answer(label, [], profile_summary, job_context=job_context)
+                # Fallback to AI for general free-text questions, but keep answers short
+                answer = await _ai_answer(
+                    label,
+                    [],
+                    profile_summary,
+                    job_context=job_context,
+                    user_id=user_id,
+                    profile=profile,
+                    resume=resume,
+                    job=job,
+                    settings_obj=settings_obj,
+                    user_full_name=user_full_name,
+                )
 
             if answer:
                 await _js_set_value(page, inp, str(answer))
-                logger.info("Filled text input", label=label[:60], value=str(answer)[:60])
+                logger.info("Filled text input", label=label[:60], value=(str(answer)[:120] if len(str(answer))>120 else str(answer)))
         except Exception as e:
             logger.warning("Could not fill text input", error=str(e))
 
@@ -826,31 +1569,67 @@ async def _fill_all_fields(page, profile, resume, settings_obj, profile_summary:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _find_submit_button(page):
-    for container_sel in (
-        "#application_form", ".application-modal", "#apply-modal",
-        "form[id*='apply']", "form[action*='apply']",
-        ".modal.show", ".modal[style*='block']",
-    ):
-        container = await page.query_selector(container_sel)
-        if container:
-            for btn_sel in (
-                "#submit", "button[type='submit']", "input[type='submit']",
-                "button:has-text('Submit')", "button:has-text('Submit Application')",
-            ):
-                btn = await container.query_selector(btn_sel)
-                if btn and await btn.is_visible():
-                    logger.info("Found submit", container=container_sel, btn=btn_sel)
-                    return btn
+    """Try a wide set of selectors (scoped first, then page-wide) to find the submit/confirm CTA."""
+    submit_selectors = [
+        "button[type='submit']",
+        "input[type='submit']",
+        "button:has-text('Submit application')",
+        "button:has-text('Submit')",
+        "button:has-text('Apply now')",
+        "button:has-text('Apply Now')",
+        "button:has-text('Apply')",
+        "button.btn-primary",
+        ".submit_application",
+        ".submit-btn",
+        ".submit-button",
+        ".btn-primary",
+        "input[type='button'][value*='Submit']",
+        "button:has-text('Proceed')",
+        "button:has-text('Continue')",
+    ]
 
-    for btn in await page.query_selector_all("button, input[type='submit']"):
+    # Scoped search inside likely modal/form containers first
+    container_selectors = (
+        "#application_form", ".application-modal", "#apply-modal",
+        "form[id*='apply']", "form[action*='apply']", ".modal.show",
+        ".modal[style*='block']", ".internship-apply-modal", ".modal-content form", "form",
+    )
+
+    for container_sel in container_selectors:
+        container = await page.query_selector(container_sel)
+        if not container:
+            continue
+        for sel in submit_selectors:
+            try:
+                btn = await container.query_selector(sel)
+                if btn and await btn.is_visible():
+                    logger.info("Found submit (scoped)", container=container_sel, selector=sel)
+                    return btn
+            except Exception:
+                continue
+
+    # Page-wide search fallback
+    for sel in submit_selectors:
+        try:
+            btn = await page.query_selector(sel)
+            if btn and await btn.is_visible():
+                logger.info("Found submit (page-wide)", selector=sel)
+                return btn
+        except Exception:
+            continue
+
+    # Last resort: scan generic buttons for helpful text
+    for btn in await page.query_selector_all("button, input[type='submit'], input[type='button'], a[role='button']"):
         try:
             if not await btn.is_visible():
                 continue
             txt = ((await btn.inner_text()) or "").strip().lower()
-            if txt in ("apply now", "apply", "easy apply") or len(txt) > 50:
+            aria = ((await btn.get_attribute("aria-label")) or "").strip().lower()
+            label = txt or aria
+            if not label or len(label) > 80:
                 continue
-            if any(w in txt for w in ("submit", "send application", "submit application")):
-                logger.info("Found submit by text", txt=txt)
+            if any(w in label for w in ("submit", "send application", "submit application", "proceed", "continue", "next", "apply")):
+                logger.info("Found submit by text fallback", txt=label)
                 return btn
         except Exception:
             pass
@@ -872,8 +1651,6 @@ _SUCCESS_SIGNALS = (
     "application has been sent",
     "you have applied",
     "application submitted",
-    "recommended internships for you",
-    "recommended internships",
     "congratulations",
 )
 
@@ -882,9 +1659,55 @@ async def _check_submission_result(page, internship_id: Optional[str] = None) ->
     """
     Return a success dict if submission succeeded, None if it clearly failed.
     """
-    html = (await page.content()).lower()
     url = page.url
     logger.info("Checking submission result", url=url, id=internship_id)
+
+    async def _read_detail_cta_state() -> dict:
+        return await page.evaluate("""
+            () => {
+                var pageText = (document.body && document.body.innerText ? document.body.innerText : '').toLowerCase();
+                var cta = document.querySelector('.top_apply_now_cta, .apply_now_cta, button.top_apply_now_cta');
+                var text = cta ? (cta.innerText || '').toLowerCase().trim() : '';
+                var cls = cta ? (cta.className || '').toLowerCase() : '';
+
+                var visibleButtons = Array.from(document.querySelectorAll('button, a[role="button"], input[type="button"], input[type="submit"]'))
+                    .filter(function(el) { return !!(el.offsetParent !== null); })
+                    .map(function(el) { return ((el.innerText || el.value || el.getAttribute('aria-label') || '')).toLowerCase().trim(); })
+                    .filter(function(t) { return t && t.length < 120; });
+
+                var anyButtonText = visibleButtons.join(' | ');
+
+                var notEligible = text.includes('not eligible') ||
+                                  pageText.includes('not eligible') ||
+                                  pageText.includes('not eligible for this internship') ||
+                                  anyButtonText.includes('not eligible') ||
+                                  cls.includes('not-eligible') ||
+                                  cls.includes('not_eligible');
+
+                var appliedLike = text.includes('applied') ||
+                                  text.includes('application sent') ||
+                                  text.includes('withdraw') ||
+                                  pageText.includes('already applied') ||
+                                  pageText.includes('application submitted') ||
+                                  anyButtonText.includes('applied') ||
+                                  anyButtonText.includes('withdraw') ||
+                                  anyButtonText.includes('application sent') ||
+                                  cls.includes('applied');
+
+                var applyNow = text === 'apply now' || text.includes('apply now');
+
+                if (notEligible) {
+                    return { state: 'not_eligible', text: text };
+                }
+                if (appliedLike) {
+                    return { state: 'applied', text: text };
+                }
+                if (applyNow) {
+                    return { state: 'apply_now', text: text };
+                }
+                return { state: 'unknown', text: text };
+            }
+        """)
 
     # 0. Check for explicit success URL redirect
     if "/application_submitted" in url or "application/success" in url or "matching-preferences" in url:
@@ -925,6 +1748,12 @@ async def _check_submission_result(page, internship_id: Optional[str] = None) ->
         if await page.query_selector(f"{sel}:visible"):
             logger.info("Confirmed via success overlay/selector", selector=sel)
             return {"success": True, "ats": "internshala", "verified": True}
+
+    # 1b. Explicit negative signal should win over weak positive heuristics.
+    cta_state = await _read_detail_cta_state()
+    if cta_state.get("state") == "not_eligible":
+        logger.info("Submission rejected by eligibility", text=cta_state.get("text", ""))
+        return {"success": False, "ineligible": True, "error": "Internshala marked this job as Not eligible", "verified": True}
 
     # 2. Applied badge / button state (SCOPED to current internship if possible)
     # If we have internship_id, we look for indicators near links containing that ID
@@ -973,23 +1802,26 @@ async def _check_submission_result(page, internship_id: Optional[str] = None) ->
             logger.info("Confirmed via modal text", signal=sig)
             return {"success": True, "ats": "internshala", "verified": True}
 
-    # 4. Application form modal closed (AJAX success, no confirmation overlay)
-    for _ in range(16):
-        await asyncio.sleep(0.5)
-        modal_gone = await page.evaluate("""
-            () => {
-                var m = document.querySelector('.modal.show');
-                if (!m) return true;
-                // Modal is open but it's a SUCCESS confirmation — not a form
-                var t = (m.innerText || '').toLowerCase();
-                return t.includes('applied') || t.includes('submitted') || t.includes('thank you');
-            }
-        """)
-        if modal_gone:
-            logger.info("Confirmed — application form modal gone or shows success")
+    # 4. Strict final-state verification with reload.
+    # Modal close alone is not proof; we require a clear detail-page state.
+    for attempt in range(3):
+        await asyncio.sleep(2.0 if attempt == 0 else 1.0)
+        final_state = await _read_detail_cta_state()
+        logger.info("Post-submit detail state", attempt=attempt, state=final_state.get("state"), text=final_state.get("text", ""))
+
+        if final_state.get("state") == "not_eligible":
+            return {"success": False, "ineligible": True, "error": "Internshala marked this job as Not eligible", "verified": True}
+        if final_state.get("state") == "applied":
             return {"success": True, "ats": "internshala", "verified": True}
 
-    return {"success": False, "error": "Could not verify application success - check manually"}  # Modal still open with no success signal
+        if attempt < 2:
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                logger.warning("Post-submit reload failed", error=str(e))
+
+    logger.warning("Submission confirmation still ambiguous after reload checks; will allow retry", url=url, id=internship_id)
+    return None
 
 
 async def _get_form_errors(page) -> str:
@@ -1026,6 +1858,8 @@ async def _get_form_errors(page) -> str:
 async def _fill_application_form(
     page, profile, resume, settings_obj,
     internship_id=None, job_title_for_verify=None, job=None,
+    user_id: str = None,
+    user_full_name: str = None,
 ) -> dict:
     await _screenshot(page, "application_form_open")
     await asyncio.sleep(2)
@@ -1078,7 +1912,7 @@ async def _fill_application_form(
         logger.info("  field", tag=f["tag"], type=f["type"], name=f["name"],
                     id=f["id"], visible=f["visible"], required=f["required"])
 
-    await _fill_all_fields(page, profile, resume, settings_obj, profile_summary, cover_answer, job_context=job_context)
+    await _fill_all_fields(page, profile, resume, settings_obj, profile_summary, cover_answer, job_context=job_context, user_id=user_id, user_full_name=user_full_name, job=job)
 
     await asyncio.sleep(1)
     await _screenshot(page, "before_submit")
@@ -1088,42 +1922,192 @@ async def _fill_application_form(
         await _screenshot(page, "no_submit_found")
         return {"success": False, "error": "No submit button found in application form"}
 
-    # First submit attempt
-    await page.evaluate(
-        "function(el) { el.scrollIntoView({block:'center'}); el.click(); }", submit_btn
-    )
-    await asyncio.sleep(2)
+    # First submit attempt - try multiple strategies
+    submission_successful = False
+    submit_responses = []
+
+    def _capture_submit_request(request):
+        try:
+            url = (request.url or "").lower()
+            if "internshala.com" not in url:
+                return
+            if any(token in url for token in ("apply", "application", "submit", "captcha", "login", "verify")):
+                submit_responses.append({
+                    "event": "request",
+                    "method": getattr(request, "method", None),
+                    "url": request.url,
+                    "resource_type": getattr(request, "resource_type", None),
+                    "post_data": (_truncate(getattr(request, "post_data", None), 3000) if getattr(request, "post_data", None) else None),
+                })
+        except Exception:
+            pass
+
+    def _capture_submit_response(response):
+        # Schedule an async task to record richer details (post data + response body)
+        try:
+            url = (response.url or "").lower()
+            if "internshala.com" not in url:
+                return
+            # Only record potentially relevant endpoints (apply/submit/captcha/login) or non-2xx statuses
+            if response.status >= 300 or any(token in url for token in ("apply", "application", "submit", "captcha", "login", "verify")):
+                try:
+                    asyncio.create_task(_record_submit_response(response))
+                except Exception:
+                    # Fallback: shallow record if tasks can't be scheduled
+                    try:
+                        submit_responses.append({
+                            "status": response.status,
+                            "method": getattr(response.request, "method", None),
+                            "url": response.url,
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    async def _record_submit_response(response):
+        try:
+            req = response.request
+            method = getattr(req, "method", None)
+            post_data = None
+            # Try multiple ways to access post data depending on Playwright version
+            try:
+                if hasattr(req, "post_data"):
+                    maybe = req.post_data
+                    post_data = maybe() if callable(maybe) else maybe
+            except Exception:
+                try:
+                    post_data = await req.post_data()
+                except Exception:
+                    post_data = None
+
+            resp_text = None
+            try:
+                resp_text = await response.text()
+            except Exception:
+                resp_text = None
+
+            entry = {
+                "status": response.status,
+                "method": method,
+                "url": response.url,
+                "post_data": (post_data[:3000] if isinstance(post_data, str) and len(post_data) > 3000 else post_data),
+                "response_text": (resp_text[:3000] if isinstance(resp_text, str) and len(resp_text) > 3000 else resp_text),
+            }
+            submit_responses.append(entry)
+        except Exception:
+            pass
+
+    page.on("request", _capture_submit_request)
+    page.on("response", _capture_submit_response)
+
+    # Strategy 1: Prefer the site's own submit flow via a native click.
+    try:
+        await page.evaluate("window.onerror = () => false;")
+        await submit_btn.scroll_into_view_if_needed()
+        await submit_btn.click(timeout=5000)
+        logger.info("Clicked submit via native click")
+        submission_successful = True
+        await asyncio.sleep(8)  # Wait much longer for form processing
+    except Exception as e:
+        logger.warning("Native submit click failed", error=str(e))
+
+    # Strategy 2: Fallback to a direct form submission if the click path fails.
+    # CRITICAL: Target the APPLICATION form specifically, not the first form on page
+    # (which could be a Google Analytics tracking form that navigates to blank page)
+    if not submission_successful:
+        try:
+            submit_via_form = await page.evaluate("""
+                () => {
+                    // Target application form specifically, never a tracking/analytics form
+                    var selectors = [
+                        '#application_form',
+                        'form[action*="apply"]',
+                        'form[action*="application"]',
+                        '.modal.show form',
+                        '#apply-modal form',
+                        '.application-modal form',
+                        'form[method="POST"][id]',  // Named form, likely not tracking
+                    ];
+                    for (var i = 0; i < selectors.length; i++) {
+                        var form = document.querySelector(selectors[i]);
+                        if (form && form.offsetParent !== null) {  // Check if visible
+                            window.onerror = () => false;
+                            form.submit();
+                            return selectors[i];
+                        }
+                    }
+                    return false;
+                }
+            """)
+            if submit_via_form:
+                logger.info("Submitted via form.submit()", form=submit_via_form)
+                submission_successful = True
+                await asyncio.sleep(8)
+        except Exception as e:
+            logger.warning("form.submit() failed", error=str(e))
+
+    if not submission_successful:
+        try:
+            await page.evaluate("function(el) { el.scrollIntoView({block:'center'}); el.click(); }", submit_btn)
+            logger.info("Clicked submit via page.evaluate click")
+            submission_successful = True
+            await asyncio.sleep(8)
+        except Exception:
+            try:
+                await page.evaluate("(el)=>{ ['mousedown','mouseup','click'].forEach(evt=>el.dispatchEvent(new MouseEvent(evt,{bubbles:true,cancelable:true}))); }", submit_btn)
+                logger.info("Clicked submit via dispatched events")
+                submission_successful = True
+                await asyncio.sleep(8)
+            except Exception as e:
+                logger.warning("All submit click attempts failed", error=str(e))
 
     if await _has_captcha(page):
         if not await _wait_for_captcha_resolution(page, timeout_s=180):
+            page.remove_listener("request", _capture_submit_request)
+            page.remove_listener("response", _capture_submit_response)
             return {"success": False, "captcha": True, "error": "reCAPTCHA on submit"}
 
-    await asyncio.sleep(random.uniform(3, 5))
     await _screenshot(page, "after_submit")
 
+    try:
+        submit_dom_snapshot = await page.evaluate("""
+            () => {
+                var bodyText = (document.body && document.body.innerText ? document.body.innerText : '').replace(/\s+/g, ' ').trim();
+                var buttons = Array.from(document.querySelectorAll('button, a[role="button"], input[type="button"], input[type="submit"]'))
+                    .filter(function(el) { return !!(el.offsetParent !== null); })
+                    .map(function(el) {
+                        return (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+                    })
+                    .filter(function(text) { return text && text.length < 120; });
+                var modalText = '';
+                var modal = document.querySelector('.modal.show');
+                if (modal) modalText = (modal.innerText || '').replace(/\s+/g, ' ').trim();
+                return {
+                    url: location.href,
+                    title: document.title || '',
+                    body_excerpt: bodyText.slice(0, 1200),
+                    modal_excerpt: modalText.slice(0, 500),
+                    buttons: buttons.slice(0, 15),
+                };
+            }
+        """)
+        logger.info("Post-submit DOM snapshot", snapshot=submit_dom_snapshot)
+    except Exception as e:
+        logger.warning("Could not capture post-submit DOM snapshot", error=str(e))
+
     result = await _check_submission_result(page, internship_id=internship_id)
+    page.remove_listener("request", _capture_submit_request)
+    page.remove_listener("response", _capture_submit_response)
+
+    if submit_responses:
+        logger.info("Post-submit network responses", responses=submit_responses[:20])
+
     if result:
         return result
 
-    # Modal still open — re-fill newly-visible fields and retry once
-    error_msg = await _get_form_errors(page)
-    logger.warning("Submit failed — refilling and retrying", errors=(error_msg or "none")[:200])
-
-    await _fill_all_fields(page, profile, resume, settings_obj, profile_summary, cover_answer, job_context=job_context)
-    await asyncio.sleep(1)
-    await _screenshot(page, "before_retry_submit")
-
-    submit_btn2 = await _find_submit_button(page)
-    if submit_btn2:
-        await page.evaluate(
-            "function(el) { el.scrollIntoView({block:'center'}); el.click(); }", submit_btn2
-        )
-        await asyncio.sleep(random.uniform(3, 5))
-        await _screenshot(page, "after_retry_submit")
-        result = await _check_submission_result(page, internship_id=internship_id)
-        if result:
-            return result
-
+    # Do not retry the submit path here: a second submit can tear down the
+    # modal and destroy the evidence we need to diagnose the backend response.
     final_error = await _get_form_errors(page)
     await _screenshot(page, "submit_failed_final")
     return {
@@ -1136,7 +2120,7 @@ async def _fill_application_form(
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None) -> dict:
+async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None, user_full_name: Optional[str] = None) -> dict:
     context = page.context
 
     # First try to load from file (legacy)
@@ -1153,13 +2137,49 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
             logger.warning("Could not load cookies from database", error=str(e))
     
     if cookies:
+        # ── Advanced Stealth Fingerprinting ──────────────────────
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+            Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin' }
+                ]
+            });
+            window.chrome = {
+                runtime: { connect: () => ({}), sendMessage: () => {} },
+                loadTimes: () => ({}),
+                csi: () => ({})
+            };
+
+            const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+            if (originalQuery) {
+                window.navigator.permissions.query = (parameters) =>
+                    parameters && parameters.name === 'notifications'
+                        ? Promise.resolve({ state: Notification.permission })
+                        : originalQuery(parameters);
+            }
+
+            delete window.__playwright;
+            delete window.__pw_manual;
+            delete window.playwrightBinding;
+        """)
+        # ─────────────────────────────────────────────────────────────
+
+        # Inject cookies first
         try:
             await context.add_cookies(cookies)
             logger.info("Injected cookies", count=len(cookies))
         except Exception as e:
             logger.warning("Could not inject cookies", error=str(e))
 
-    await page.goto("https://internshala.com/", wait_until="domcontentloaded", timeout=30000)
+
+    await _goto_lenient(page, "https://internshala.com/", timeout_ms=60000)
     await asyncio.sleep(random.uniform(2, 3))
     await _dismiss_blocking_modals_only(page)
 
@@ -1173,11 +2193,24 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         email = getattr(settings_obj, "INTERNShALA_EMAIL", "")
         password = getattr(settings_obj, "INTERNShALA_PASSWORD", "")
         if not email or not password:
+            await _take_failure_screenshot(page, "not_logged_in")
             return {"success": False, "error": "Not logged in. Run save_cookies.py."}
+        
+        logger.info("Session expired/invalid; attempting auto-login")
         result = await _do_login(page, email, password)
         if not result["success"]:
             return result
+        
+        # Save cookies to file AND database
         await _save_cookies(context)
+        if user_id:
+            try:
+                from app.services.cookie_service import cookie_service
+                new_cookies = await context.cookies()
+                await cookie_service.save_cookies(user_id, "internshala", new_cookies)
+                logger.info("Automatic login cookies saved to database", user_id=user_id)
+            except Exception as e:
+                logger.warning("Failed to save automatic login cookies to database", error=str(e))
 
     logger.info("Logged in", status=True)
 
@@ -1199,7 +2232,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     logger.info("Internship ID extracted", internship_id=internship_id, slug=slug)
 
     logger.info("Loading detail page", url=job.source_url)
-    await page.goto(job.source_url, wait_until="networkidle", timeout=45000)
+    await _goto_lenient(page, job.source_url, timeout_ms=60000)
 
     await asyncio.sleep(2)
     
@@ -1251,7 +2284,17 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     await _dismiss_blocking_modals_only(page)
 
     if await _is_on_login_wall(page):
-        return {"success": False, "error": "Session expired. Run save_cookies.py."}
+        # Double check - sometimes a modal flickers during load
+        logger.info("Possible login wall detected - waiting 5s to confirm")
+        await asyncio.sleep(5)
+        await _dismiss_blocking_modals_only(page)
+        if await _is_on_login_wall(page):
+            # Triple check - are we actually logged in despite the modal?
+            if not await _is_logged_in(page):
+                logger.warning("Confirmed session expired on login wall")
+                return {"success": False, "error": "Session expired. Run save_cookies.py."}
+            else:
+                logger.info("Login wall was a false positive - proceeding")
 
     await _screenshot(page, "detail_page")
 
@@ -1321,14 +2364,9 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         return {"success": True, "already_applied": True, "ats": "internshala", "verified": True}
     
     for attempt in range(20):
-        for link in await page.query_selector_all("a[href]"):
-            href = await link.get_attribute("href") or ""
-            if internship_id in href and "apply" in href:
-                apply_btn = link
-                logger.info("Found apply link by href+id", href=href)
-                break
+        # Prefer specific button IDs first
         if not apply_btn:
-            for btn_id in ("easy_apply_button", "apply_button", "btn-apply", "apply_now_button", "apply-button", "easy-apply"):
+            for btn_id in ("easy_apply_button", "apply_button", "btn-apply", "apply_now_button", "apply-button", "easy-apply", "make_application"):
                 el = await page.query_selector(f"#{btn_id}")
                 if el and await el.is_visible():
                     apply_btn = el
@@ -1336,8 +2374,10 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                     break
         if not apply_btn:
             for sel in (
-                "button:has-text('Easy Apply')", "a:has-text('Apply Now')",
-                "button:has-text('Apply Now')", "a:has-text('Easy Apply')",
+                ".top_apply_now_cta", "#make_application", "#easy_apply_button",
+                "button:has-text('Apply now')", "button.btn-primary:has-text('Apply')",
+                "button:has-text('Easy Apply')", "button:has-text('Apply Now')",
+                "a:has-text('Apply Now')", "a:has-text('Easy Apply')",
                 # Additional Internshala-specific selectors
                 "a.button_apply_big", "a.apply-button",
                 "button[type='submit']:has-text('Apply')",
@@ -1414,7 +2454,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     if any(phrase in btn_text for phrase in blocked_phrases):
         logger.warning("Button shows login required - checking session")
         # Try to see if this is a login wall - reload and check
-        await page.reload(wait_until="networkidle")
+        await page.reload(wait_until="domcontentloaded")
         await asyncio.sleep(2)
         if await _is_on_login_wall(page):
             return {"success": False, "error": "Session expired. Run save_cookies.py."}
@@ -1435,7 +2475,6 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
             await asyncio.sleep(2)
             
             # Wait for button to be enabled (max 10 seconds)
-            button_clicked = False
             for wait_attempt in range(20):
                 is_disabled = await apply_btn.get_attribute("disabled")
                 is_enabled = await apply_btn.is_enabled()
@@ -1450,12 +2489,6 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                     logger.info("Button has apply text but reports disabled - attempting JS click anyway")
                     break
                     
-                # If button was disabled with "not eligible", still try JS click after waiting
-                if btn_was_disabled and wait_attempt >= 5:
-                    logger.info("Button still disabled but enough waiting - trying JS click")
-                    break
-                    
-                logger.info("Apply button not ready, waiting...", is_enabled=is_enabled, is_disabled=is_disabled)
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning("Could not wait for button enablement", error=str(e))
@@ -1469,66 +2502,124 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         logger.warning("External application URL detected - skipping", url=href)
         return {"success": False, "error": "External job posting - requires manual application", "external": True}
 
-    if href and href not in ("#", "") and "javascript" not in href:
+    if False and href and href not in ("#", "") and "javascript" not in href:
         full_url = href if href.startswith("http") else f"https://internshala.com{href}"
         logger.info("Navigating to apply URL", url=full_url)
-        await page.goto(full_url, wait_until="networkidle", timeout=45000)
+        await _goto_lenient(page, full_url, timeout_ms=60000)
         await asyncio.sleep(2)
         await _dismiss_blocking_modals_only(page)
     else:
         logger.info("Clicking Apply (AJAX modal)")
+
+        # Human-like pre-click motion to avoid a cold, direct apply trigger.
+        try:
+            for _ in range(3):
+                await page.mouse.wheel(0, random.randint(120, 320))
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+            await page.mouse.wheel(0, -random.randint(80, 220))
+            await asyncio.sleep(random.uniform(0.3, 0.7))
+            bbox = await apply_btn.bounding_box()
+            if bbox:
+                await page.mouse.move(
+                    bbox["x"] + random.uniform(-40, 40),
+                    bbox["y"] + random.uniform(20, 70),
+                )
+                await asyncio.sleep(random.uniform(0.25, 0.6))
+                await page.mouse.move(
+                    bbox["x"] + bbox["width"] / 2,
+                    bbox["y"] + bbox["height"] / 2,
+                )
+                await asyncio.sleep(random.uniform(0.15, 0.4))
+        except Exception as e:
+            logger.debug("Human-like pre-click motion skipped", error=str(e))
+        
+        # SAFETY: Strip href from parent <a> tags to absolutely prevent native fallback navigation
+        try:
+            await page.evaluate("""(btn) => {
+                let a = btn.closest('a');
+                if (a) {
+                    a.dataset.originalHref = a.getAttribute('href');
+                    a.removeAttribute('href');
+                }
+            }""", apply_btn)
+        except Exception as e:
+            logger.warning("Failed to strip href from parent anchor", error=str(e))
+            
         await asyncio.sleep(1)
         
-        # Try multiple click methods - more aggressive approach
+        # Strategy 1: Directly invoke Internshala's own JS modal function
+        # This bypasses click-detection entirely by calling the same function the button calls
+        logger.info("Attempting direct JS modal trigger")
         click_success = False
-        
-        # 1. First try clicking WITHOUT force (normal behavior)
         try:
-            await apply_btn.click(timeout=3000)
+            js_modal_result = await page.evaluate(f"""async () => {{
+                const internshipId = '{internship_id}';
+                
+                // Try Internshala's known global functions
+                if (typeof openApplicationModal === 'function') {{
+                    openApplicationModal(internshipId);
+                    return 'openApplicationModal';
+                }}
+                if (typeof apply_now === 'function') {{
+                    apply_now(internshipId);
+                    return 'apply_now';
+                }}
+                // Try jQuery trigger
+                if (typeof $ !== 'undefined') {{
+                    const btn = $('.top_apply_now_cta');
+                    if (btn.length) {{
+                        btn.trigger('click');
+                        return 'jquery_trigger';
+                    }}
+                }}
+                // Trigger all click handlers registered on the button
+                const btn = document.querySelector('.top_apply_now_cta');
+                if (btn) {{
+                    const events = ['mousedown', 'mouseup', 'click'];
+                    events.forEach(evt => {{
+                        btn.dispatchEvent(new MouseEvent(evt, {{bubbles: true, cancelable: true, view: window}}));
+                    }});
+                    return 'dispatched_events';
+                }}
+                return 'no_method_found';
+            }}""")
+            logger.info("JS modal trigger result", result=js_modal_result)
             click_success = True
-            logger.info("Regular click succeeded")
-        except Exception as e:
-            logger.warning("Regular click failed, trying with force", error=str(e))
-            try:
-                await apply_btn.click(force=True, timeout=3000)
-                click_success = True
-                logger.info("Force click succeeded")
-            except Exception as e2:
-                logger.warning("Force click also failed", error=str(e2))
+        except Exception as js_e:
+            logger.warning("JS modal trigger failed", error=str(js_e))
         
-        # 2. If regular click didn't work, try JS clicks
+        # Strategy 2: Physical click as fallback
         if not click_success:
             try:
-                await page.evaluate("(btn) => btn.click()", apply_btn)
+                await apply_btn.click(timeout=3000)
                 click_success = True
-                logger.info("JS click succeeded")
-            except Exception as js_e:
-                logger.warning("JS click failed", error=str(js_e))
-        
-        # 3. Try dispatchEvent as last resort
-        if not click_success:
-            try:
-                await page.evaluate("""(btn) => {
-                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
-                }""", apply_btn)
-                click_success = True
-                logger.info("dispatchEvent click succeeded")
-            except Exception as de:
-                logger.warning("dispatchEvent click failed", error=str(de))
-        
-        # 4. Last resort - directly navigate to apply URL if we can extract it
-        if not click_success:
-            # Try to get the href and navigate directly
-            apply_href = await apply_btn.get_attribute("href")
-            if apply_href and apply_href != "#":
-                logger.info("Click failed, but found href - navigating directly", href=apply_href)
-                if not apply_href.startswith("http"):
-                    apply_href = "https://internshala.com" + apply_href
-                await page.goto(apply_href, wait_until="networkidle", timeout=45000)
-                click_success = True
-                logger.info("Navigated to apply URL successfully")
+                logger.info("Physical click succeeded")
+            except Exception as e:
+                logger.warning("Physical click failed", error=str(e))
         
         await asyncio.sleep(3)
+        
+        # DIAGNOSTIC: Capture console messages and errors
+        page_console_logs = []
+        page_errors = []
+        
+        def on_console_msg(msg):
+            page_console_logs.append({"type": msg.type, "text": msg.text})
+        
+        def on_page_error(error):
+            page_errors.append(str(error))
+        
+        page.on("console", on_console_msg)
+        page.on("pageerror", on_page_error)
+        
+        # Wait a bit more for async JS to finish
+        await asyncio.sleep(2)
+        
+        # Log console output
+        if page_console_logs:
+            logger.info("Page console messages after click", messages=page_console_logs[:10])
+        if page_errors:
+            logger.warning("Page errors after click", errors=page_errors[:5])
         
         # Check what's on the page after clicking
         page_content = await page.content()
@@ -1554,7 +2645,8 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                 # Check for any application form
                 modal = await page.query_selector(
                     "#application_form, .application-modal, form[id*='apply'], "
-                    ".modal.show form, .modal[style*='block'] form, .apply-modal, #easy-apply-modal, .application-form-container"
+                    ".modal.show form, .modal[style*='block'] form, .apply-modal, #easy-apply-modal, .application-form-container, "
+                    "#apply_now_modal, .internship-apply-modal, .modal-content form"
                 )
                 visible_tas = [ta for ta in await page.query_selector_all("textarea") if await ta.is_visible()]
                 
@@ -1562,46 +2654,77 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                 visible_inputs = await page.query_selector_all("input:not([type='hidden'])")
                 visible_inputs = [inp for inp in visible_inputs if await inp.is_visible()]
                 
-                logger.info(f"Modal check #{check_num}", modal=bool(modal), textareas=len(visible_tas), inputs=len(visible_inputs))
+                # Check for "Proceed" or "Update" buttons that might block the form
+                proceed_text_btn = await page.query_selector("button:has-text('Proceed'), button:has-text('Update'), .btn-primary:has-text('Proceed')")
+                
+                logger.info(f"Modal check #{check_num}", modal=bool(modal), textareas=len(visible_tas), inputs=len(visible_inputs), has_proceed=bool(proceed_text_btn))
                 
                 if modal or visible_tas or len(visible_inputs) > 3:
                     modal_opened = True
                     logger.info("Application modal/form opened", inputs=len(visible_inputs))
                     break
                 
+                if proceed_text_btn and await proceed_text_btn.is_visible():
+                    logger.info("Found potential blocker button - clicking it")
+                    await proceed_text_btn.click()
+                    await asyncio.sleep(1)
+                
+                # If no form found after 5 checks, try clicking the button again
+                if check_num == 10 and not modal_opened:
+                    logger.info("Modal not opening - retrying Apply click")
+                    try:
+                        await page.evaluate("""() => {
+                            const btn = document.querySelector('.top_apply_now_cta') || document.querySelector('button:has-text("Apply now")');
+                            if (btn) btn.click();
+                        }""")
+                    except Exception:
+                        pass
+                
                 # If no form found after several checks, try refreshing the page - sometimes form loads after a moment
-                if check_num >= 10 and not modal_opened and checked_without_form == 0:
-                    checked_without_form += 1
-                    logger.info("No form found after 10 checks - refreshing page")
-                    await page.reload(wait_until="networkidle")
+                if check_num == 15 and not modal_opened:
+                    logger.info("No form found after 15 checks - refreshing page")
+                    await page.reload(wait_until="domcontentloaded")
                     await asyncio.sleep(2)
                     
-                # Last resort: if still no form after 25 checks, try direct navigation to apply page
-                if check_num >= 25 and not modal_opened:
-                    # Try to get the current job URL and navigate to apply directly
+                # If no form found after 5 checks, try direct navigation as a strong fallback
+                if check_num == 5 and not modal_opened:
+                    logger.info("Modal not opening - trying direct navigate as fallback")
                     current_url = page.url
                     if "internshala.com/internship/detail/" in current_url:
-                        apply_url = current_url.replace("/internship/detail/", "/internship/apply/") + "/"
-                        logger.info("No modal found - trying direct navigate to apply URL", url=apply_url)
+                        # 1. Jiggle mouse near the button first to trigger any lazy-load behavioral scripts
                         try:
-                            await page.goto(apply_url, wait_until="networkidle", timeout=30000)
-                            await asyncio.sleep(3)
+                            bbox = await apply_btn.bounding_box()
+                            if bbox:
+                                await page.mouse.move(bbox['x'] - 10, bbox['y'] - 10)
+                                await asyncio.sleep(0.1)
+                                await page.mouse.move(bbox['x'] + bbox['width'] + 5, bbox['y'] + 5)
+                                await asyncio.sleep(0.1)
+                                await page.mouse.move(bbox['x'] + bbox['width']/2, bbox['y'] + bbox['height']/2)
+                        except Exception: pass
+
+                        apply_url = current_url.replace("/internship/detail/", "/internship/apply/") + "/"
+                        logger.info("Navigating directly to apply URL", url=apply_url)
+                        try:
+                            # Use a longer timeout and wait for load
+                            await _goto_lenient(page, apply_url, timeout_ms=60000)
+                            await asyncio.sleep(4) # Give it plenty of time to render
                             
-                            # Check what we got on the direct apply page
-                            page_content = await page.content()
-                            has_form = "<form" in page_content.lower()
-                            has_not_eligible = "not eligible" in page_content.lower()
-                            
-                            logger.info("Direct navigation result", url=apply_url, has_form=has_form, has_not_eligible=has_not_eligible)
-                            
-                            form_after_nav = await page.query_selector("form")
-                            if form_after_nav:
-                                logger.info("Form found after direct navigation!")
+                            # Check if we were redirected back to the home or detail page
+                            if "apply" not in page.url:
+                                logger.warning("Redirected away from apply page - session may be restricted", final_url=page.url)
+                                break
+
+                            # Re-check for form on the new page
+                            has_form = await page.query_selector("form, textarea, input[type='text']")
+                            if has_form:
+                                logger.info("Application form found after direct navigation")
                                 modal_opened = True
                                 break
-                            elif has_not_eligible:
-                                # Even if no form, if page says not eligible, we know the answer
-                                logger.warning("Direct URL shows not eligible - skipping")
+                            
+                            # Check for "Not Eligible" or "Already Applied"
+                            page_text = (await page.content()).lower()
+                            if "already applied" in page_text or "not eligible" in page_text:
+                                logger.warning("Direct URL shows not eligible or already applied")
                                 break
                         except Exception as nav_err:
                             logger.warning("Direct navigation failed", error=str(nav_err))
@@ -1617,17 +2740,154 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                         err_text = (await err.inner_text()) or ""
                         logger.warning("Error element found after click", text=err_text[:100])
                         has_error = True
+    
+    # ─ CRITICAL FIX: After modal confirms open, check if it's the LOGIN modal
+    # If login modal appears instead of app form, session CSRF is expired
+    if modal_opened:
+        try:
+            password_field = await page.query_selector(".modal.show input[type='password'], .modal.show input[name='password']")
+            if password_field:
+                logger.error("LOGIN MODAL opened instead of application form - session CSRF expired")
+                
+                # Close this modal
+                try:
+                    close_btn = await page.query_selector(".modal.show button[aria-label='Close'], .modal.show .close, .modal.show button.close")
+                    if close_btn:
+                        await close_btn.click()
+                        await asyncio.sleep(1)
+                except Exception:
+                    pass
+                
+                # Re-navigate to homepage to refresh session
+                logger.info("Refreshing session by navigating to Internshala homepage")
+                await _goto_lenient(page, "https://internshala.com/", timeout_ms=30000)
+                await asyncio.sleep(3)
+                
+                # Verify we're still logged in
+                if not await _is_logged_in(page):
+                    return {"success": False, "error": "Session lost after CSRF refresh - need to re-authenticate"}
+                
+                logger.info("Session refreshed - retrying apply on internship")
+                # Navigate back to internship detail page
+                try:
+                    await _goto_lenient(page, url, timeout_ms=60000)
+                    await asyncio.sleep(2)
+                except Exception:
+                    logger.warning("Could not navigate back to internship detail page")
+                    return {"success": False, "error": "Could not return to internship after session refresh"}
+                
+                # One more try: click Apply again
+                apply_btn_retry = await page.query_selector(".top_apply_now_cta, .apply_now_cta, button:has-text('Apply now')")
+                if apply_btn_retry:
+                    try:
+                        await apply_btn_retry.click(timeout=5000)
+                        logger.info("Retried apply click after session refresh")
+                        await asyncio.sleep(4)
+                        # Re-check if modal is now the application form
+                        modal_check = await page.query_selector(".modal.show")
+                        if modal_check:
+                            # Check again for password field
+                            still_login = await page.query_selector(".modal.show input[type='password']")
+                            if still_login:
+                                logger.error("Login modal STILL appearing after session refresh - bot detection active")
+                                return {"success": False, "error": "Internshala login modal persists - bot detection active", "bot_detected": True}
+                            logger.info("Application form now open after session refresh")
+                            # Continue with form filling
+                        else:
+                            logger.warning("No modal after retry - internship may require additional steps")
+                            return {"success": False, "error": "Modal did not reopen after session refresh"}
+                    except Exception as retry_err:
+                        logger.warning("Retry apply click failed", error=str(retry_err))
+                        return {"success": False, "error": "Could not retry apply after session refresh"}
+                else:
+                    logger.error("Apply button not found on retry")
+                    return {"success": False, "error": "Apply button not found on detail page retry"}
+        except Exception as session_err:
+            logger.error("Session refresh check failed", error=str(session_err))
+            # Don't completely fail - continue with current state
+            pass
             
             if not modal_opened:
-                await _screenshot(page, "modal_did_not_open")
-                return {"success": False, "error": "Application modal did not open after clicking Apply"}
+                # DIAGNOSTIC: Comprehensive logging of what's on the page
+                try:
+                    final_html = await page.content()
 
-    if await _is_on_login_wall(page):
+                    # Count different element types
+                    all_forms = await page.query_selector_all("form")
+                    all_modals = await page.query_selector_all(".modal, [role='dialog']")
+                    all_iframes = await page.query_selector_all("iframe")
+                    all_buttons = await page.query_selector_all("button")
+
+                    form_count = len(all_forms)
+                    modal_count = len(all_modals)
+                    iframe_count = len(all_iframes)
+                    button_count = len(all_buttons)
+
+                    logger.warning(
+                        "Modal fail comprehensive diagnostic",
+                        url=page.url,
+                        form_count=form_count,
+                        modal_count=modal_count,
+                        iframe_count=iframe_count,
+                        button_count=button_count,
+                        page_title=await page.title(),
+                        console_logs=page_console_logs[-3:] if page_console_logs else [],
+                        page_errors=page_errors[-3:] if page_errors else [],
+                        html_length=len(final_html),
+                        html_sample=final_html[1000:3000].replace('\n', ' '),
+                    )
+                except Exception as e:
+                    logger.error("Failed to gather diagnostics", error=str(e))
+
+                # Some Internshala flows open an interstitial page with a "Proceed"
+                # button instead of rendering the application form immediately. Give
+                # that path a chance before failing the application.
+                proceed_btn = await page.query_selector(
+                    "button:has-text('Proceed to application'), button:has-text('Update resume and proceed'), .education_incomplete_proceed_btn, #resume_proceed_btn"
+                )
+                if proceed_btn and await proceed_btn.is_visible():
+                    logger.info("Found interstitial 'Proceed' button after modal failure - clicking it")
+                    try:
+                        await proceed_btn.click(timeout=5000)
+                        await asyncio.sleep(2)
+                        for _ in range(20):
+                            if await page.query_selector("#application_form, .application-modal, form[id*='apply']"):
+                                modal_opened = True
+                                break
+                            await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.warning("Could not click interstitial proceed button", error=str(e))
+
+                if not modal_opened:
+                    await _screenshot(page, "modal_did_not_open")
+                    return {"success": False, "error": "Application modal did not open after clicking Apply"}
+    if "/registration/" in page.url:
+        try:
+            page_text = await page.evaluate("document.body.innerText")
+            logger.warning("Redirected to registration page. Page content:", text=page_text[:1500])
+            
+            # Check for specific blocks like mobile verification
+            if "verify" in page_text.lower() and "mobile" in page_text.lower():
+                return {"success": False, "error": "Internshala is asking for mobile verification due to high-risk login (VPS IP)."}
+        except Exception:
+            pass
+            
+        return {"success": False, "error": "Profile incomplete on Internshala or blocked by step-up verification. Please check the logs."}
+
+    if not modal_opened and await _is_on_login_wall(page):
         return {"success": False, "error": "Login wall after apply click. Session expired."}
 
-    return await _fill_application_form(
-        page, profile, resume, settings_obj,
-        internship_id=internship_id,
-        job_title_for_verify=(getattr(job, "title", "") or "").lower()[:25],
-        job=job,
-    )
+    try:
+        return await _fill_application_form(
+            page, profile, resume, settings_obj,
+            internship_id=internship_id,
+            job_title_for_verify=(getattr(job, "title", "") or "").lower()[:25],
+            job=job,
+            user_id=user_id,
+            user_full_name=user_full_name,
+        )
+    except ValueError as e:
+        if "Login modal" in str(e):
+            logger.warning("Login modal detected during form fill", error=str(e))
+            return {"success": False, "error": "Internshala anti-bot detection: login modal served instead of application form", "bot_detected": True}
+        raise   

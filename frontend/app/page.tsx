@@ -9,8 +9,10 @@ import {
   Bot, Search, FileText, Send, Bell, BarChart2,
   ArrowRight, Globe, Sparkles, Shield, Target,
   MessageSquare, Star, TrendingUp, Loader2,
-  ChevronDown, Activity, ShieldCheck, Book
+  ChevronDown, Activity, ShieldCheck, Book,
+  Mail, ExternalLink
 } from "lucide-react";
+import { siInstagram, siX } from "simple-icons";
 import { PLAN_FEATURES, PLAN_PRICES } from "@/lib/subscription";
 import dynamic from "next/dynamic";
 
@@ -166,6 +168,325 @@ function Footer() {
   );
 }
 
+function BrandIcon({ icon, className, color }: { icon: { path: string; hex: string }, className?: string, color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill={color ?? `#${icon.hex}`}>
+      <path d={icon.path} />
+    </svg>
+  );
+}
+
+type ContactLink =
+  | { kind: "email"; label: string; href: string; value: string }
+  | { kind: "brand"; label: string; href: string; value: string; icon: { path: string; hex: string }; color?: string }
+  | { kind: "linkedin"; label: string; href: string; value: string };
+
+type DeveloperProfile = {
+  title: string;
+  name: string;
+  role: string;
+  photo: string;
+  github: string;
+  githubLabel: string;
+  highlights: string[];
+};
+
+const DEVELOPER_PROFILES: DeveloperProfile[] = [
+  {
+    title: "Backend & Deployment",
+    name: "Sudharsan",
+    role: "APIs, workers, infra, and releases",
+    photo: "/assets/IMG_0156.JPG",
+    github: "",
+    githubLabel: "",
+    highlights: [
+      "Python, FastAPI, SQLAlchemy (async), Alembic",
+      "Postgres, Redis, Celery, Docker, VPS & Nginx",
+      "Playwright automation and deployment ops",
+    ],
+  },
+  {
+    title: "Frontend Developer",
+    name: "Visva",
+    role: "UI systems, motion, and product polish",
+    photo: "/assets/visva%20frontend.png",
+    github: "",
+    githubLabel: "",
+    highlights: [
+      "Next.js + TypeScript, Tailwind, Framer Motion",
+      "Design -> implementation, responsive UI",
+      "API integration and auth flows (JWT)",
+    ],
+  },
+  {
+    title: "QA Tester",
+    name: "Ravi Shankar",
+    role: "Regression checks, bug reports, and test coverage",
+    photo: "/assets/ravifrontend.jpeg",
+    github: "",
+    githubLabel: "",
+    highlights: [
+      "Manual + API testing, container checks",
+      "Log analysis (Celery, bots) and bug verification",
+      "Test plans for apply-bot and login flows",
+    ],
+  },
+];
+
+function DeveloperCarouselSection() {
+  const [activeDeveloper, setActiveDeveloper] = useState(0);
+  const [direction, setDirection] = useState(1);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setDirection(1);
+      setActiveDeveloper((current) => (current + 1) % DEVELOPER_PROFILES.length);
+    }, 7000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const paginate = (nextDirection: number) => {
+    setDirection(nextDirection);
+    setActiveDeveloper((current) => {
+      const nextIndex = (current + nextDirection + DEVELOPER_PROFILES.length) % DEVELOPER_PROFILES.length;
+      return nextIndex;
+    });
+  };
+
+  const activeProfile = DEVELOPER_PROFILES[activeDeveloper];
+
+  const variants = {
+    enter: (slideDirection: number) => ({
+      x: slideDirection > 0 ? 120 : -120,
+      opacity: 0,
+      scale: 0.98,
+      filter: "blur(6px)",
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      scale: 1,
+      filter: "blur(0px)",
+    },
+    exit: (slideDirection: number) => ({
+      x: slideDirection > 0 ? -120 : 120,
+      opacity: 0,
+      scale: 0.98,
+      filter: "blur(6px)",
+    }),
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-120px" }}
+      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+      className="rounded-[28px] border border-white/[0.06] bg-[#111111] p-4 md:p-6 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.95)]"
+    >
+      <div className="flex items-center justify-between gap-4 mb-5 md:mb-6">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.28em] text-zinc-500 font-black">Team</p>
+          <h3 className="mt-2 text-xl md:text-2xl font-bold text-white tracking-tight">Swipe through the team</h3>
+        </div>
+        <div className="hidden md:flex items-center gap-2 rounded-full border border-white/[0.06] bg-black/30 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-zinc-400 font-black">
+          <span>{String(activeDeveloper + 1).padStart(2, "0")}</span>
+          <span className="text-zinc-600">/</span>
+          <span>{String(DEVELOPER_PROFILES.length).padStart(2, "0")}</span>
+        </div>
+      </div>
+
+      <div className="relative overflow-hidden rounded-[30px] border border-white/[0.06] bg-black/30">
+        <AnimatePresence initial={false} custom={direction} mode="wait">
+          <motion.div
+            key={activeProfile.title}
+            custom={direction}
+            variants={variants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.16}
+            onDragEnd={(_, info) => {
+              if (info.offset.x < -90 || info.velocity.x < -450) {
+                paginate(1);
+              } else if (info.offset.x > 90 || info.velocity.x > 450) {
+                paginate(-1);
+              }
+            }}
+            className="touch-pan-y cursor-grab active:cursor-grabbing"
+          >
+            <div className="relative p-4 md:p-5">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.06),transparent_40%)] pointer-events-none" />
+              <div className="relative grid gap-4 md:grid-cols-[180px_1fr] md:gap-5 items-start">
+                <div className="relative mx-auto md:mx-0 w-[160px] h-[160px] md:w-[180px] md:h-[180px] rounded-[24px] overflow-hidden border border-white/[0.08] bg-[#0d0d0d] shadow-[0_12px_40px_-20px_rgba(0,0,0,0.6)]">
+                  <Image
+                    src={activeProfile.photo}
+                    alt={activeProfile.name}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 768px) 180px, 220px"
+                  />
+                </div>
+
+                <div className="space-y-4 text-center md:text-left">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500 font-black">{activeProfile.title}</p>
+                    <h4 className="mt-2 text-xl md:text-3xl font-bold text-white tracking-tight">{activeProfile.name}</h4>
+                    <p className="mt-2 text-sm md:text-sm text-[#A1A1AA] leading-6 max-w-2xl">{activeProfile.role}</p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    {activeProfile.highlights.map((highlight) => (
+                      <div key={highlight} className="rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-[#D4D4D8] leading-6">
+                        {highlight}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    {activeProfile.github ? (
+                      <a
+                        href={activeProfile.github}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white transition-all hover:border-white/15 hover:bg-white/[0.07]"
+                      >
+                        <span className="text-[11px] uppercase tracking-[0.24em] text-zinc-400 font-black">GitHub</span>
+                        <span className="text-zinc-500">·</span>
+                        <span className="truncate">{activeProfile.githubLabel}</span>
+                        <ExternalLink className="h-4 w-4 text-[#A1A1AA]" />
+                      </a>
+                    ) : (
+                      <div className="inline-flex items-center gap-2 rounded-2xl border border-white/[0.04] bg-white/[0.02] px-4 py-3 text-sm text-zinc-500">Shared on request</div>
+                    )}
+
+                    <div className="flex items-center justify-center md:justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => paginate(-1)}
+                        aria-label="Previous developer"
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white transition-all hover:bg-white/[0.08]"
+                      >
+                        <ChevronRight className="h-4 w-4 rotate-180" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => paginate(1)}
+                        aria-label="Next developer"
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white transition-all hover:bg-white/[0.08]"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-zinc-500 font-black">Swipe or use the arrows</p>
+        <div className="flex items-center gap-2">
+          {DEVELOPER_PROFILES.map((profile, index) => (
+            <button
+              key={profile.title}
+              type="button"
+              aria-label={`Show ${profile.title}`}
+              onClick={() => {
+                setDirection(index > activeDeveloper ? 1 : -1);
+                setActiveDeveloper(index);
+              }}
+              className={`h-2.5 rounded-full transition-all ${index === activeDeveloper ? "w-8 bg-white" : "w-2.5 bg-white/20 hover:bg-white/35"}`}
+            />
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function DevelopersContactSection() {
+  const contactLinks: ContactLink[] = [
+    { kind: "email", label: "Email", href: "mailto:applivoagent@gmail.com", value: "applivoagent@gmail.com" },
+    { kind: "brand", label: "X", href: "https://x.com/applivo_in", value: "x.com/applivo_in", icon: siX, color: "#f5f5f5" },
+    { kind: "linkedin", label: "LinkedIn", href: "https://www.linkedin.com/company/applivo-agent/", value: "linkedin.com/company/applivo-agent" },
+    { kind: "brand", label: "Instagram", href: "https://www.instagram.com/applivo.in/", value: "instagram.com/applivo.in", icon: siInstagram },
+  ];
+
+  return (
+    <section id="contact" className="relative overflow-hidden border-t border-white/[0.04] bg-[#080808] py-20 md:py-28">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%)] pointer-events-none" />
+
+      <div className="relative z-10 max-w-7xl mx-auto px-6">
+        <div className="max-w-3xl mb-12 md:mb-16">
+          <p className="text-[11px] uppercase tracking-[0.35em] text-zinc-500 font-black mb-4">Developers & Contact</p>
+          <h2 className="text-3xl md:text-5xl font-bold tracking-tight text-white leading-[1.05]">
+            Built by a small team that cares about the details.
+          </h2>
+          <p className="mt-4 text-sm md:text-base text-[#888888] max-w-2xl leading-7">
+            Meet the people behind Applivo and reach out directly for product questions, partnerships, or support.
+          </p>
+        </div>
+
+        <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-6 md:gap-8">
+          <DeveloperCarouselSection />
+
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-120px" }}
+            transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+            className="rounded-[20px] border border-white/[0.06] bg-[#111111] p-4 md:p-6 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.95)]"
+          >
+            <p className="text-[10px] uppercase tracking-[0.24em] text-zinc-500 font-black">Contact</p>
+            <h3 className="mt-2 text-xl md:text-2xl font-bold text-white tracking-tight">Let&apos;s talk</h3>
+            <p className="mt-2 text-sm text-[#A1A1AA] leading-6">
+              For product demos, support, feedback, or collaborations, use any of the direct channels below.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              {contactLinks.map((item) => {
+                return (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    target={item.href.startsWith("http") ? "_blank" : undefined}
+                    rel={item.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                    className="group flex items-center justify-between gap-4 rounded-2xl border border-white/[0.06] bg-black/30 px-4 py-4 transition-all hover:border-white/12 hover:bg-white/[0.04]"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-white">
+                        {item.kind === "linkedin" ? (
+                          <span className="text-[11px] font-black uppercase tracking-[0.08em]">in</span>
+                        ) : item.kind === "email" ? (
+                          <Mail className="h-4 w-4" />
+                        ) : (
+                          <BrandIcon icon={item.icon} color={item.color} className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-500 font-black">{item.label}</p>
+                        <p className="mt-1 truncate text-sm font-medium text-white">{item.value}</p>
+                      </div>
+                    </div>
+                    <ExternalLink className="h-4 w-4 shrink-0 text-[#A1A1AA] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </a>
+                );
+              })}
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ─── MAIN PAGE ───────────────────────────────────────────── */
 export default function LandingPage() {
   const isLoggedIn = useMemo(() => {
@@ -270,6 +591,8 @@ export default function LandingPage() {
       <div id="pricing">
         <Pricing />
       </div>
+
+      <DevelopersContactSection />
 
       {/* ── GIANT BACKGROUND LOGO ───────────────────────────── */}
       <section className="relative w-full bg-[#080808] pt-12 pb-4 md:pt-20 md:pb-6 flex justify-center items-center overflow-hidden z-0 border-t border-white/[0.02]">

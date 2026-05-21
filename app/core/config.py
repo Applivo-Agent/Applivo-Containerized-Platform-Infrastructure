@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     USER_MIN_SALARY: int = 0
     JWT_SECRET_KEY: str = "changeme-jwt-secret-at-least-32-characters-long"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 Days
     GOOGLE_CLIENT_ID: str = ""
     ENCRYPTION_KEY: str = ""
 

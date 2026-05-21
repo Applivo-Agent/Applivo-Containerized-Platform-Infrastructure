@@ -11,19 +11,14 @@ import json
 from typing import Optional
 
 import structlog
-from openai import AsyncOpenAI
-
-from app.core.config import settings
+from sqlalchemy import select
+from app.core.database import get_db_context
+from app.models.job import Job, JobAnalysis
+from app.models.user import UserProfile, UserSkill
+from app.models.resume import CoverLetter
+from app.services.ai_router import ai_router
 
 logger = structlog.get_logger()
-
-if settings.ai_api_key:
-    client = AsyncOpenAI(
-        api_key=settings.ai_api_key,
-        base_url="https://api.groq.com/openai/v1",
-    )
-else:
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 COVER_LETTER_PROMPT = """
 You are an expert career coach writing a personalized cover letter.
@@ -94,7 +89,7 @@ Job Summary: {analysis.ai_summary or job.description_clean[:500] if job.descript
             prompt = COVER_LETTER_PROMPT.format(tone=tone)
 
             try:
-                response = await client.chat.completions.create(
+                response = await ai_router.chat_completions_create(
                     model=settings.OPENAI_MODEL_HEAVY,
                     max_tokens=800,
                     temperature=0.4,
@@ -103,9 +98,11 @@ Job Summary: {analysis.ai_summary or job.description_clean[:500] if job.descript
                         {"role": "user", "content": f"USER PROFILE:\n{user_context}\n\nJOB:\n{job_context}"},
                     ],
                     response_format={"type": "json_object"},
+                    user_id=user_id,
+                    endpoint="/api/cover-letters/generate",
                 )
-                data = json.loads(response.choices[0].message.content)
-                tokens_used = response.usage.total_tokens
+                data = json.loads(response["content"])
+                tokens_used = response.get("usage", {}).get("total_tokens", 0)
             except Exception as e:
                 logger.error("Cover letter generation failed", error=str(e))
                 raise

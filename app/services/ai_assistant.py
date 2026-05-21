@@ -10,7 +10,7 @@ import json
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
-from sqlalchemy import select, func, desc, String
+from sqlalchemy import select, func, desc, String, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -33,97 +33,88 @@ class AI_Persona(str, Enum):
 
 
 PERSONA_PROMPTS = {
-    AI_Persona.GENERAL: """
-You are a friendly AI Career Assistant. You're helpful, witty, and conversational.
-You can chat about anything, but specialize in career topics.
+    "USER_LUMI": """
+You are Lumi, the personal AI assistant for a single authenticated user inside the Applivo platform.
+Your role is to act as a highly knowledgeable, personalized assistant for THIS USER ONLY.
 
-IF THE USER NEEDS CUSTOMER SUPPORT:
-- Phone: 9751120169 (Mon-Sat, 9AM-6PM)
-- Email: support@applivo.com
-- Response time: Within 24 hours
+CORE PRINCIPLE:
+- You are a PERSONAL assistant, not a platform analyst.
+- All responses must be based on the CURRENT USER only.
+- You must deeply understand and use the user's own data, history, preferences, and activity to provide intelligent, tailored responses.
 
-IF THE USER ASKS ABOUT COSTS/TOKEN USAGE:
-- AI usage is tracked per user
-- Check their plan for monthly credits
-- Token usage is calculated from API calls
+STRICT DATA ISOLATION:
+- You must NEVER access, reference, or reveal admin statistics, platform-wide metrics, other users' data, revenue information, total user counts, or system infrastructure details.
+- If the user asks about platform-wide stats (e.g., "How many users?"), respond: "I focus on your personal account data. I don't have access to platform-wide statistics."
 
-IF THE USER IS AN ADMIN, you can also help with:
-- Platform statistics (total users, active users, subscriptions)
-- Revenue data (total revenue, monthly revenue)
-- Application stats, jobs scraped, active sessions
-- LLM token usage across the platform
+NO HALLUCINATION RULE:
+- Never guess numbers or invent values.
+- If data is missing, say: "I don't currently have that information in your account."
 
-Simply respond to their questions based on the context provided.
-
-RULES:
-- Never fabricate information about jobs, applications, subscriptions, payments, or users
-- If you don't have data in the provided context or tool output, say so clearly
-- Prefer exact numbers from the context over estimation
-- Use light formatting (bold, lists) when helpful
-- Be conversational but concise
+OUTPUT STYLE:
+- User-specific insights.
+- Clear, actionable next steps.
+- Relevant numbers from their account only.
+- DO NOT use markdown bold stars (like **text**). Use plain text or simple capitalization for emphasis instead.
 """,
 
-    AI_Persona.CAREER_COACH: """
-You are a senior career coach with 15+ years of experience helping professionals advance.
+    "ADMIN_LUMI": """
+You are Lumi Admin, the system intelligence assistant for the Applivo platform.
+You operate in ADMIN MODE. Your responsibility is to provide accurate, operational, infrastructure-level insights about the platform.
 
-YOUR SPECIALTIES:
-- Career path planning and transitions
-- Interview preparation and mock practice
-- Salary negotiation strategies
-- Leadership and management advice
+ADMIN DATA ACCESS SCOPE:
+- System Health: process counts, success/failure rates, queue sizes, worker status (Celery, Redis).
+- Business Metrics: revenue, active subscriptions, payment history, user activity counts.
+- AI Metrics: token usage, latency, throughput across all users.
+- Operations: failed jobs, scraper errors, session timeouts.
 
-HOW YOU HELP:
-- Ask clarifying questions to understand their situation
-- Provide actionable, specific advice
-- End with clear action items
+CRITICAL ADMIN BEHAVIOR:
+- Always answer using real operational data, timestamps, and counts. Never guess or hallucinate.
+- If data is unavailable, say: "That metric is not currently available."
+- Be safe: reference users only in operational context (e.g., "User X has a failed task"). Never reveal passwords or secrets.
 
-STYLE: Professional but warm, focus on results.
+ERROR INTERPRETATION RULE:
+1) Identify the failure cause (e.g., "Selector failed", "Session expired").
+2) Identify the affected component (e.g., "Browser agent", "Worker").
+3) Suggest corrective action (e.g., "Run save_cookies.py", "Restart Celery").
+
+OUTPUT STYLE:
+- System Status
+- Root Cause
+- Impact
+- Recommended Action
+- DO NOT use markdown bold stars (like **text**). Use plain text or simple capitalization for emphasis instead.
 """,
 
-    AI_Persona.RESUME_EXPERT: """
-You are a resume writing expert and ATS (Applicant Tracking Systems) specialist.
+    "ADMIN_FINANCE": """
+You are Lumi Finance, the Revenue and Business Intelligence assistant for the Applivo platform.
+You operate in ADMIN ANALYTICS MODE. Your responsibility is to monitor, calculate, and explain revenue performance, financial health, subscription metrics, and SaaS growth indicators.
 
-YOUR SPECIALTIES:
-- Resume tailoring for specific roles
-- ATS keyword optimization
-- Achievement quantification
-- Format best practices
+PRIMARY REVENUE METRICS:
+- MRR (Monthly Recurring Revenue): Sum of all ACTIVE subscription prices.
+- ARR (Annual Recurring Revenue): MRR * 12.
+- Conversion Rate: Paid Users / Total Users * 100.
+- Churn Rate: Cancelled Users / (Active + Cancelled) * 100.
+- ARPU (Average Revenue Per User): Total Revenue / Paying Users.
 
-HOW YOU HELP:
-- Review existing resumes and give specific feedback
-- Suggest improvements for ATS compatibility
-- Be specific with changes: "Change 'managed team' to 'Led team of 5 engineers delivering $2M project'"
+CRITICAL BEHAVIOR:
+- Use real numbers and timestamps. Never guess or invent revenue.
+- CALCULATE metrics using the provided context.
+- Identify trends: "MRR is up 5% this week" if data supports it.
+- Detect anomalies: sudden drops in revenue or spikes in failed payments.
+
+OUTPUT STYLE:
+- Metric Name
+- Value
+- Trend
+- Interpretation
+- Action
+- DO NOT use markdown bold stars.
 """,
 
-    AI_Persona.JOB_SCOUT: """
-You are an expert job researcher with deep knowledge of the tech job market.
-
-YOUR SPECIALTIES:
-- Finding hidden job opportunities
-- Company research and culture analysis
-- Salary benchmarking
-- Remote vs hybrid vs onsite tradeoffs
-
-HOW YOU HELP:
-- Search and filter job listings based on criteria
-- Present options with pros/cons
-- Focus on quality over quantity
-""",
-
-    AI_Persona.APPLICATION_ASSISTANT: """
-You are an application strategy expert who helps users land their dream jobs.
-
-YOUR SPECIALTIES:
-- Application strategy and prioritization
-- Cover letter writing
-- Follow-up timing and strategies
-- Handling rejections
-
-HOW YOU HELP:
-- Help craft compelling application materials
-- Decide which jobs to apply to
-- Give clear next steps after each application
-""",
+    AI_Persona.CAREER_COACH: "You are Lumi, acting as a senior career coach. Use the user's specific history to give advice. DO NOT use markdown bold stars (like **text**). Use CAPS for emphasis.",
+    AI_Persona.RESUME_EXPERT: "You are Lumi, acting as a resume expert. Suggest specific, quantifiable improvements to the user's resume. DO NOT use markdown bold stars (like **text**). Use CAPS for emphasis.",
+    AI_Persona.JOB_SCOUT: "You are Lumi, acting as a job researcher. Filter jobs based ONLY on the user's stated preferences. DO NOT use markdown bold stars (like **text**). Use CAPS for emphasis.",
+    AI_Persona.APPLICATION_ASSISTANT: "You are Lumi, acting as an application expert. Help the user prioritize their specific applications. DO NOT use markdown bold stars (like **text**). Use CAPS for emphasis.",
 }
 
 
@@ -178,16 +169,30 @@ class EnhancedCareerAssistant:
     def set_persona(self, persona: AI_Persona) -> None:
         self.persona = persona
 
-    async def chat(self, message: str, history: List[ChatMessage], persona: Optional[AI_Persona] = None) -> ChatResponse:
+    async def chat(self, message: str, history: List[Any], persona: Optional[AI_Persona] = None) -> Dict[str, Any]:
         if persona:
-            self.persona = persona
-
+            self.set_persona(persona)
+            
+        # Determine base persona based on role
+        is_admin = getattr(self.user, "is_superuser", False)
+        base_persona = "USER_LUMI"
+        
+        if is_admin:
+            # Auto-switch to Finance persona if analytics context is detected
+            finance_keywords = ["revenue", "mrr", "arr", "churn", "conversion", "sales", "profit", "analytics"]
+            if any(k in message.lower() for k in finance_keywords):
+                base_persona = "ADMIN_FINANCE"
+            else:
+                base_persona = "ADMIN_LUMI"
+        
+        # If persona requested, try to map it, otherwise use base
+        system_prompt = PERSONA_PROMPTS.get(self.persona, PERSONA_PROMPTS[base_persona])
+        
+        # Build context
         context = await self._build_context()
-        system_prompt = PERSONA_PROMPTS.get(self.persona, PERSONA_PROMPTS[AI_Persona.GENERAL])
         admin_rules = ""
         if getattr(self.user, "is_superuser", False):
             admin_rules = """
-
     === ADMIN RULES ===
     - Answer only from the admin platform stats and user data in context.
     - Do not invent revenue, payment, subscription, or usage numbers.
@@ -320,37 +325,58 @@ class EnhancedCareerAssistant:
             from datetime import datetime, date
             today = date.today()
             
-            jobs_today = await self.db.execute(
-                select(func.count(Job.id)).where(func.date(Job.scraped_at) == today)
-            )
-            jobs_today_count = jobs_today.scalar() or 0
-
-            total_active = await self.db.execute(select(func.count(Job.id)).where(Job.is_active == True))
-            total_active_count = total_active.scalar() or 0
-
+            # Application stats
             app_result = await self.db.execute(
                 select(Application.status, func.count(Application.id).label("count"))
                 .where(Application.user_id == self.user.id)
                 .group_by(Application.status)
             )
             app_counts = {str(row.status): int(row.count) for row in app_result.all()}
-
-            profile_result = await self.db.execute(select(UserProfile).where(UserProfile.user_id == self.user.id))
-            profile = profile_result.scalar_one_or_none()
-
-            user_name = self.user.full_name.split()[0] if self.user.full_name else "there"
-
             total_apps = sum(list(app_counts.values())) if app_counts else 0
 
-            context = f"""
-=== {user_name.upper()}'S STATUS ===
-📊 Applications: {total_apps} total
-   - Applied: {app_counts.get('applied', 0)}
-   - Interviews: {app_counts.get('interview_scheduled', 0)}
-   - Offers: {app_counts.get('offer_received', 0)}
-💼 Jobs: {total_active_count} active ({jobs_today_count} today)
-🆙 Auto-apply: {'Enabled' if profile and profile.auto_apply_enabled else 'Disabled'}
-"""
+            # Job stats
+            jobs_today = await self.db.execute(
+                select(func.count(Job.id)).where(func.date(Job.scraped_at) == today)
+            )
+            jobs_today_count = jobs_today.scalar() or 0
+            total_active = await self.db.execute(select(func.count(Job.id)).where(Job.is_active == True))
+            total_active_count = total_active.scalar() or 0
+
+            # Profile & Skills
+            from app.models.user import UserSkill, UserProfile
+            profile_result = await self.db.execute(select(UserProfile).where(UserProfile.user_id == self.user.id))
+            profile = profile_result.scalar_one_or_none()
+            
+            skills_result = await self.db.execute(select(UserSkill).where(UserSkill.user_id == self.user.id))
+            skills = [s.name for s in skills_result.scalars().all()]
+
+            user_name = self.user.full_name.split()[0] if self.user.full_name else "there"
+            
+            # --- BUILD CONTEXT STRING ---
+            context = f"=== {user_name.upper()}'S CAREER PROFILE ===\n"
+            context += f"👤 Full Name: {self.user.full_name}\n"
+            
+            if profile:
+                context += f"📍 Location: {profile.location or 'Unknown'}\n"
+                context += f"🎯 Desired Roles: {', '.join(profile.desired_roles) if profile.desired_roles else 'Not specified'}\n"
+                context += f"📜 Summary: {profile.professional_summary or 'No summary provided'}\n"
+                
+                if profile.education:
+                    latest_edu = profile.education[0] if isinstance(profile.education, list) and profile.education else {}
+                    context += f"🎓 Latest Education: {latest_edu.get('degree')} in {latest_edu.get('field')} ({latest_edu.get('institution')})\n"
+                
+                if profile.work_experience:
+                    recent_jobs = [f"{exp.get('title')} at {exp.get('company')}" for exp in profile.work_experience[:2]]
+                    context += f"💼 Recent Experience: {', '.join(recent_jobs)}\n"
+
+            context += f"🛠️ Top Skills: {', '.join(skills[:15]) if skills else 'None listed'}\n"
+            context += f"\n=== {user_name.upper()}'S PLATFORM STATUS ===\n"
+            context += f"📊 Applications: {total_apps} total\n"
+            for status, count in app_counts.items():
+                context += f"   - {status.replace('_', ' ').title()}: {count}\n"
+            
+            context += f"💼 Job Market: {total_active_count} active listings ({jobs_today_count} found today)\n"
+            context += f"🆙 Auto-apply: {'ENABLED' if profile and profile.auto_apply_enabled else 'DISABLED'}\n"
 
             # If user is admin, add platform stats
             if getattr(self.user, 'is_superuser', False):
@@ -362,10 +388,11 @@ class EnhancedCareerAssistant:
                 users_result = await self.db.execute(select(sql_func.count(UserModel.id)))
                 total_users = users_result.scalar() or 0
                 
-                # Active subscriptions
+                # Active subscriptions (Cast status to string for comparison)
+                from app.models.subscription import SubscriptionStatus
                 subs_result = await self.db.execute(
                     select(sql_func.count(Subscription.id)).where(
-                        sql_func.lower(Subscription.status.cast(String)) == SubscriptionStatus.ACTIVE.value
+                        sql_func.lower(cast(Subscription.status, String)) == SubscriptionStatus.ACTIVE.value.lower()
                     )
                 )
                 active_subs = subs_result.scalar() or 0
@@ -376,12 +403,31 @@ class EnhancedCareerAssistant:
                 )
                 total_revenue = revenue_result.scalar() or 0
                 
+                # SaaS Metrics
+                from app.models.subscription import PLAN_PRICES
+                active_plans_result = await self.db.execute(
+                    select(Subscription.plan).where(
+                        sql_func.lower(cast(Subscription.status, String)) == SubscriptionStatus.ACTIVE.value.lower()
+                    )
+                )
+                active_plans = active_plans_result.scalars().all()
+                mrr_paise = sum(PLAN_PRICES.get(p, 0) for p in active_plans)
+                
+                paying_users_count = (await self.db.execute(
+                    select(sql_func.count(sql_func.distinct(Payment.user_id)))
+                    .where(sql_func.lower(cast(Payment.status, String)) == 'captured')
+                )).scalar() or 0
+                
+                conversion_rate = round((paying_users_count / (total_users or 1)) * 100, 2)
+                
                 context += f"""
-
 === ADMIN PLATFORM STATS ===
 👥 Total Users: {total_users}
-💳 Active Subscriptions: {active_subs}
-💰 Total Revenue: ₹{total_revenue or 0}
+💳 Active Subscriptions: {len(active_plans)}
+💰 Total Revenue: ₹{(total_revenue or 0) / 100}
+📈 MRR: ₹{mrr_paise / 100}
+🚀 ARR: ₹{(mrr_paise * 12) / 100}
+🎯 Conversion: {conversion_rate}%
 """
 
             return context

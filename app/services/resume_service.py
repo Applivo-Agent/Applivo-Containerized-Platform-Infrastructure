@@ -23,11 +23,9 @@ from app.models.resume import Resume, ResumeType
 from app.models.user import User, UserProfile, UserSkill
 from app.models.application import Application
 
+from app.services.ai_router import ai_router
+
 logger = structlog.get_logger()
-client = AsyncOpenAI(
-    api_key=settings.ai_api_key,
-    base_url="https://api.groq.com/openai/v1",
-)
 
 RESUME_TAILORING_PROMPT = """
 You are an expert resume writer and ATS optimization specialist.
@@ -111,7 +109,7 @@ class ResumeService:
 
             # Call GPT-4o for tailoring
             try:
-                response = await client.chat.completions.create(
+                response = await ai_router.chat_completions_create(
                     model=settings.OPENAI_MODEL_HEAVY,
                     max_tokens=2000,
                     temperature=0.2,
@@ -119,9 +117,10 @@ class ResumeService:
                         {"role": "system", "content": RESUME_TAILORING_PROMPT},
                         {"role": "user", "content": f"BASE RESUME:\n{profile_context}\n\nTARGET JOB:\n{job_context}"},
                     ],
-                
+                    user_id=user_id,
+                    endpoint="/api/resumes/generate",
                 )
-                content = response.choices[0].message.content
+                content = response["content"]
                 if not content or content.startswith("% Error"):
                     logger.warning("Resume generation returned empty or error", content=content)
                     raise ValueError("LLM returned empty response")
@@ -133,7 +132,7 @@ class ResumeService:
                         content = content[4:]
                     content = content.strip()
                 tailored_data = json.loads(content)
-                tokens_used = response.usage.total_tokens
+                tokens_used = response.get("usage", {}).get("total_tokens", 0)
             except Exception as e:
                 logger.error("Resume generation LLM failed", error=str(e))
                 raise

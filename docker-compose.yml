@@ -146,6 +146,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
       - DATABASE_URL_SYNC=postgresql://applivo:${POSTGRES_PASSWORD}@database:5432/applivo
       - BROWSER_HEADLESS=False
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     depends_on:
       database:
         condition: service_healthy

@@ -33,6 +33,7 @@ class PlanTier(str, enum.Enum):
 
 class SubscriptionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
+    SUCCESS = "SUCCESS"  # For completed payments
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
     PENDING = "PENDING"
@@ -42,6 +43,7 @@ class PaymentStatus(str, enum.Enum):
     CREATED = "CREATED"
     AUTHORIZED = "AUTHORIZED"
     CAPTURED = "CAPTURED"
+    SUCCESS = "SUCCESS"  # Legacy/Alternative for captured
     REFUNDED = "REFUNDED"
     FAILED = "FAILED"
 
@@ -144,7 +146,7 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
         return PLAN_PRICES.get(PlanTier(self.plan), 20000)
 
     def is_active(self) -> bool:
-        if self.status != SubscriptionStatus.ACTIVE:
+        if self.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.SUCCESS]:
             return False
         if self.end_date:
             end = self.end_date.replace(tzinfo=timezone.utc) if self.end_date.tzinfo is None else self.end_date

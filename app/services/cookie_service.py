@@ -8,7 +8,7 @@ Cookies are AES-256-GCM encrypted at rest, user-specific, and validated periodic
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Union
 
 import structlog
@@ -45,6 +45,7 @@ class CookieService:
         """
         Encrypt and save platform cookies for a user.
         Replaces any existing cookies for the same platform.
+        Sets expiry to 30 days from now (typical Internshala session duration).
         """
         if platform not in SUPPORTED_PLATFORMS:
             raise ValueError(f"Unsupported platform: {platform}. Supported: {SUPPORTED_PLATFORMS}")
@@ -61,10 +62,14 @@ class CookieService:
             existing = result.scalar_one_or_none()
 
             now = datetime.now(timezone.utc)
+            # Cookies typically expire in 30 days for Internshala
+            expires_at = now + timedelta(days=30)
+            
             if existing:
                 existing.encrypted_cookies = encrypted
                 existing.is_valid = True
                 existing.last_validated_at = now
+                existing.expires_at = expires_at
                 existing.updated_at = now
                 await db.commit()
                 await db.refresh(existing)
@@ -77,6 +82,7 @@ class CookieService:
                 encrypted_cookies=encrypted,
                 is_valid=True,
                 last_validated_at=now,
+                expires_at=expires_at,
             )
             db.add(cookie)
             await db.commit()

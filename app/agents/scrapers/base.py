@@ -215,58 +215,65 @@ class BaseScraper(ABC):
 
     async def _save_jobs(self, scraped_jobs: List[ScrapedJob]) -> None:
         """
-        Batch-save scraped jobs. Skips duplicates per user (same source + source_job_id + user_id).
-        Cleans description text before saving.
+        Batch-save scraped jobs using PostgreSQL ON CONFLICT DO NOTHING.
+        This prevents race conditions where multiple tasks try to save the same job.
         """
+        if not scraped_jobs:
+            return
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         async with get_db_context() as db:
-            # Fetch existing source_job_ids for THIS user to detect duplicates
-            normalized_source = self._normalize_job_source(scraped_jobs[0].source if scraped_jobs else self.source)
-            dup_query = select(Job.source_job_id).where(
-                cast(Job.source, String) == normalized_source.value,
-                Job.user_id == self._user_id,
-            )
-            existing_result = await db.execute(dup_query)
-            existing_ids = {row[0] for row in existing_result.all()}
-
-            new_jobs = []
+            values = []
             for scraped in scraped_jobs:
-                if scraped.source_job_id in existing_ids:
-                    self._jobs_duplicate += 1
-                    continue
+                values.append({
+                    "user_id": self._user_id,
+                    "source": self._normalize_job_source(scraped.source),
+                    "source_job_id": scraped.source_job_id,
+                    "source_url": scraped.source_url,
+                    "title": self._clean_title(scraped.title),
+                    "company_name": scraped.company_name.strip(),
+                    "company_logo_url": scraped.company_logo_url,
+                    "description_raw": scraped.description_raw,
+                    "description_clean": self._clean_description(scraped.description_raw),
+                    "location": scraped.location,
+                    "work_mode": self._normalize_work_mode(scraped.work_mode),
+                    "job_type": self._normalize_job_type(scraped.job_type),
+                    "experience_level": self._normalize_experience_level(getattr(scraped, "experience_level", "unknown")),
+                    "salary_min": scraped.salary_min,
+                    "salary_max": scraped.salary_max,
+                    "salary_currency": scraped.salary_currency,
+                    "posted_at": scraped.posted_at,
+                    "applicant_count": scraped.applicant_count,
+                    "easy_apply": scraped.easy_apply,
+                    "raw_html": scraped.raw_html,
+                    "scraped_at": datetime.now(timezone.utc),
+                    "status": JobStatus.NEW,
+                    "is_active": True,
+                })
 
-                job = Job(
-                    user_id=self._user_id,
-                    source=self._normalize_job_source(scraped.source),
-                    source_job_id=scraped.source_job_id,
-                    source_url=scraped.source_url,
-                    title=self._clean_title(scraped.title),
-                    company_name=scraped.company_name.strip(),
-                    company_logo_url=scraped.company_logo_url,
-                    description_raw=scraped.description_raw,
-                    description_clean=self._clean_description(scraped.description_raw),
-                    location=scraped.location,
-                    work_mode=self._normalize_work_mode(scraped.work_mode),
-                    job_type=self._normalize_job_type(scraped.job_type),
-                    experience_level=self._normalize_experience_level(getattr(scraped, "experience_level", "unknown")),
-                    salary_min=scraped.salary_min,
-                    salary_max=scraped.salary_max,
-                    salary_currency=scraped.salary_currency,
-                    posted_at=scraped.posted_at,
-                    applicant_count=scraped.applicant_count,
-                    easy_apply=scraped.easy_apply,
-                    raw_html=scraped.raw_html,
-                    scraped_at=datetime.now(timezone.utc),
-                    status=JobStatus.NEW,
-                    is_active=True,
-                )
-                new_jobs.append(job)
-                existing_ids.add(scraped.source_job_id)
-
-            if new_jobs:
-                db.add_all(new_jobs)
+            # Use ON CONFLICT DO NOTHING to handle duplicates safely
+            stmt = pg_insert(Job).values(values)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["source", "source_job_id"]
+            )
+            
+            try:
+                result = await db.execute(stmt)
                 await db.commit()
-                self._jobs_new += len(new_jobs)
-                self.log.info(f"Saved {len(new_jobs)} new jobs", user_id=self._user_id)
+                
+                # result.rowcount might not be accurate for DO NOTHING in some drivers, 
+                # but it's a good indicator.
+                inserted_count = result.rowcount if result.rowcount > 0 else 0
+                self._jobs_new += inserted_count
+                self._jobs_duplicate += (len(values) - inserted_count)
+                
+                if inserted_count > 0:
+                    self.log.info(f"Saved {inserted_count} new jobs", user_id=self._user_id)
+            except Exception as e:
+                self.log.error("Failed to batch save jobs", error=str(e))
+                await db.rollback()
+                raise
 
     # ── Utilities ────────────────────────────────────────────────────────────
 

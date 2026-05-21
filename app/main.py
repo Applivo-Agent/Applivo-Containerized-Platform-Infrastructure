@@ -361,15 +361,19 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     tb = traceback.format_exc()
+    try:
+        err_text = str(exc)
+    except Exception:
+        err_text = repr(exc)
     if settings.APP_ENV == "production":
-        logger.error("Unhandled exception", path=request.url.path, error=str(exc))
+        logger.error("Unhandled exception", path=request.url.path, error=err_text)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error", "error_id": id(exc) % 10000}
         )
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "traceback": tb}
+        content={"detail": err_text, "traceback": tb}
     )
 
 # ── Rate limiting middleware ───────────────────────────────

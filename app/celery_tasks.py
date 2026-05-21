@@ -16,14 +16,28 @@ from app.celery_app import celery_app
 
 logger = structlog.get_logger()
 
+_CELERY_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _get_worker_loop() -> asyncio.AbstractEventLoop:
+    """Return a stable event loop for this Celery worker process.
+
+    Reusing one loop avoids cross-loop asyncpg futures when SQLAlchemy keeps
+    pooled connections across task executions.
+    """
+    global _CELERY_LOOP
+
+    if _CELERY_LOOP is None or _CELERY_LOOP.is_closed():
+        _CELERY_LOOP = asyncio.new_event_loop()
+
+    return _CELERY_LOOP
+
 
 def _run_async(coro):
-    """Run an async coroutine from a Celery worker."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    """Run an async coroutine on a persistent Celery worker event loop."""
+    loop = _get_worker_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=300)
@@ -31,7 +45,7 @@ def scrape_jobs(self):
     """Scrape jobs from all configured platforms for all active users."""
     try:
         from app.agents.tasks import run_main_agent_cycle
-        _run_async(run_main_agent_cycle())
+        run_main_agent_cycle()
         logger.info("Job scraping completed")
     except Exception as e:
         logger.error("Job scraping failed", error=str(e))
@@ -43,7 +57,7 @@ def analyze_jobs(self):
     """Run AI analysis on scraped jobs."""
     try:
         from app.agents.tasks import analyze_new_jobs_batch_task
-        _run_async(analyze_new_jobs_batch_task())
+        analyze_new_jobs_batch_task()
         logger.info("Job analysis completed")
     except Exception as e:
         logger.error("Job analysis failed", error=str(e))
@@ -59,6 +73,162 @@ def auto_apply(self):
         logger.info("Auto-apply completed", result=result)
     except Exception as e:
         logger.error("Auto-apply failed", error=str(e))
+        raise self.retry(exc=e)
+
+
+@celery_app.task(bind=True, max_retries=3)
+def apply_queued_batch(self, user_id: str):
+    """Apply to queued applications for a single user on the browser worker."""
+    try:
+        from sqlalchemy import select
+
+        from app.core.config import settings
+        from app.core.database import get_db_context
+        from app.models.application import Application, ApplicationStatus
+        from app.models.job import JobAnalysis
+        from app.agents.apply_bot import ApplyBot
+        from app.services.cookie_service import cookie_service
+
+        threshold = settings.AUTO_APPLY_MATCH_THRESHOLD
+
+        async def _run():
+            async with get_db_context() as db:
+                apps_to_run = (await db.execute(
+                    select(Application).where(
+                        Application.user_id == user_id,
+                        Application.status == ApplicationStatus.QUEUED
+                    ).outerjoin(
+                        JobAnalysis, Application.job_id == JobAnalysis.job_id
+                    ).where(
+                        (JobAnalysis.match_score >= threshold) | (JobAnalysis.match_score == None)
+                    ).limit(15)
+                )).scalars().all()
+
+                app_ids = [a.id for a in apps_to_run]
+
+                if not app_ids:
+                    return {"applied": 0, "skipped": 0, "failed": 0, "message": "No jobs in queue"}
+
+                bot = ApplyBot()
+                applied_count = 0
+                skipped_count = 0
+                failed_count = 0
+                results = []
+
+                for app_id in app_ids:
+                    try:
+                        r = await bot.apply(app_id)
+                        results.append({"id": app_id, **r})
+
+                        error_text = (r.get("error") or "").lower()
+                        session_expired = "session expired" in error_text or "run save_cookies.py" in error_text or "not logged in" in error_text
+                        login_modal_block = bool(r.get("bot_detected")) or "login modal" in error_text or "anti-bot detection" in error_text
+
+                        if session_expired or login_modal_block:
+                            await cookie_service.invalidate_cookies(user_id, "internshala")
+                            failed_count += 1
+                            logger.warning(
+                                "Session blocked during apply batch",
+                                app_id=app_id,
+                                user_id=user_id,
+                                reason="login_modal" if login_modal_block else "session_expired",
+                            )
+                            # Notify user immediately so they can re-upload cookies
+                            try:
+                                from app.services.notification_service import NotificationService
+                                await NotificationService().notify(
+                                    title="⚠️ Internshala Session Blocked — Action Required",
+                                    body="""Internshala blocked the current session (expired or login wall detected), and the bot has stopped this apply batch.
+
+To resume automation, please re-upload your cookies:
+1. Log in to Internshala in your browser
+2. Go to your Applivo dashboard → Settings → Connect Accounts
+3. Follow the cookie upload guide
+
+Applications are paused until this is fixed.
+
+— Applivo AI""",
+                                    event_type="cookie_expired",
+                                    data={"platform": "internshala"},
+                                    user_id=user_id,
+                                )
+                            except Exception as notif_err:
+                                logger.error("Failed to send cookie expiry notification", user_id=user_id, error=str(notif_err))
+                            break
+
+                        if r.get("success"):
+                            if r.get("already_applied"):
+                                app = await db.get(Application, app_id)
+                                if app:
+                                    app.status = ApplicationStatus.APPLIED
+                                    app.applied_at = datetime.now(timezone.utc)
+                                    db.add(app)
+                                    await db.commit()
+                                logger.info("Already applied - synced", app_id=app_id)
+                            else:
+                                app = await db.get(Application, app_id)
+                                if app:
+                                    app.status = ApplicationStatus.APPLIED
+                                    app.applied_at = datetime.now(timezone.utc)
+                                    db.add(app)
+                                    await db.commit()
+                                applied_count += 1
+                                logger.info("Applied successfully - marked as APPLIED", app_id=app_id)
+                        elif r.get("ineligible"):
+                            skipped_count += 1
+                            app = await db.get(Application, app_id)
+                            if app:
+                                app.status = ApplicationStatus.SKIPPED
+                                app.bot_error = r.get("error", "Not eligible")
+                                db.add(app)
+                                await db.commit()
+                            logger.warning("Job not eligible - marked as SKIPPED", app_id=app_id)
+                        elif r.get("error") and "external" in error_text:
+                            failed_count += 1
+                            app = await db.get(Application, app_id)
+                            if app:
+                                app.status = ApplicationStatus.FAILED
+                                app.bot_error = r.get("error", "External posting")
+                                app.retry_count = 999
+                                db.add(app)
+                                await db.commit()
+                            logger.warning("External job - marked as FAILED", app_id=app_id)
+                        else:
+                            failed_count += 1
+                            # Persist failure to DB so it doesn't keep getting retried
+                            app = await db.get(Application, app_id)
+                            if app:
+                                app.status = ApplicationStatus.FAILED
+                                app.bot_error = r.get("error", "Application submission failed")
+                                app.retry_count = (app.retry_count or 0) + 1
+                                db.add(app)
+                                await db.commit()
+                            logger.warning("Apply failed - marked as FAILED", app_id=app_id, error=r.get("error"), retry_count=app.retry_count if app else 0)
+                    except Exception as exc:
+                        failed_count += 1
+                        # Persist exception to DB
+                        app = await db.get(Application, app_id)
+                        if app:
+                            app.status = ApplicationStatus.FAILED
+                            app.bot_error = f"Exception: {str(exc)[:500]}"
+                            app.retry_count = (app.retry_count or 0) + 1
+                            db.add(app)
+                            await db.commit()
+                        logger.error("Apply exception - marked as FAILED", app_id=app_id, error=str(exc), retry_count=app.retry_count if app else 0)
+
+                return {
+                    "applied": applied_count,
+                    "failed": failed_count,
+                    "skipped": skipped_count,
+                    "total_queued": len(app_ids),
+                    "results": results,
+                }
+
+        result = _run_async(_run())
+        logger.info("Apply queued batch completed", user_id=user_id, result=result)
+        return result
+    except Exception as e:
+        logger.error("Apply queued batch failed", user_id=user_id, error=str(e))
         raise self.retry(exc=e)
 
 
@@ -93,7 +263,7 @@ def check_emails(self):
     """Check email inbox for recruiter messages."""
     try:
         from app.agents.tasks import check_email_inbox
-        _run_async(check_email_inbox())
+        check_email_inbox()
         logger.info("Email check completed")
     except Exception as e:
         logger.error("Email check failed", error=str(e))
@@ -143,7 +313,7 @@ def check_expired_subscriptions():
 
 @celery_app.task
 def check_expired_cookies():
-    """Detect and mark expired platform cookies."""
+    """Detect and mark expired platform cookies, notify affected users."""
     try:
         from app.core.database import get_db_context
         from app.models.cookie import PlatformCookie
@@ -163,12 +333,39 @@ def check_expired_cookies():
                     cookie.is_valid = False
                     logger.info("Cookie expired", user_id=cookie.user_id, platform=cookie.platform)
                 await db.commit()
+
+                # Notify each affected user
+                if expired:
+                    from app.services.notification_service import NotificationService
+                    ns = NotificationService()
+                    for cookie in expired:
+                        try:
+                            await ns.notify(
+                                title="⚠️ Internshala Session Expired — Action Required",
+                                body=f"""Your {cookie.platform.title()} session has expired and the bot has paused applications.
+
+To resume automation, please re-upload your cookies:
+1. Log in to {cookie.platform.title()} in your browser
+2. Go to your Applivo dashboard → Settings → Connect Accounts
+3. Follow the cookie upload guide
+
+Applications are paused until this is fixed.
+
+— Applivo AI""",
+                                event_type="cookie_expired",
+                                data={"platform": cookie.platform},
+                                user_id=cookie.user_id,
+                            )
+                        except Exception as ne:
+                            logger.error("Failed to notify user of cookie expiry", user_id=cookie.user_id, error=str(ne))
+
                 return len(expired)
 
         count = _run_async(_check())
         logger.info("Expired cookies checked", expired_count=count)
     except Exception as e:
         logger.error("Cookie check failed", error=str(e))
+
 
 
 # ── Priority queue tasks (for Pro/Premium users) ────────────────────────────
@@ -178,7 +375,7 @@ def priority_scrape(self, user_id: str):
     """Priority scrape for Pro/Premium users."""
     try:
         from app.agents.tasks import run_main_agent_cycle
-        _run_async(run_main_agent_cycle())
+        run_main_agent_cycle()
         logger.info("Priority scrape completed", user_id=user_id)
     except Exception as e:
         logger.error("Priority scrape failed", user_id=user_id, error=str(e))

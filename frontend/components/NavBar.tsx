@@ -105,7 +105,7 @@ export function NavBar({ sidebarOffset = false }: NavBarProps) {
         </nav>
 
         {/* CTA — right */}
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
           {!isLoading && isAuthenticated ? (
             <>
               <button

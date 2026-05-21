@@ -5,29 +5,29 @@ import Image from "next/image";
 
 const testimonials = [
   {
-    name: "Sophia Lee",
-    handle: "@sophia_designs",
-    text: "Applivo has completely transformed how I search for jobs, saving time and boosting interviews every day."
+    name: "Ananya Rao",
+    handle: "@ananya_ui",
+    text: "Applivo has transformed how I apply to roles — it saves hours and gets me more interviews."
   },
   {
-    name: "Daniel Evans",
-    handle: "@daninnovates",
-    text: "Every feature feels thoughtfully crafted to meet the needs of busy professionals applying globally."
+    name: "Arjun Mehta",
+    handle: "@arjun_codes",
+    text: "Every feature feels thoughtfully built for busy professionals in India and helps me apply at scale."
   },
   {
-    name: "Chloe Davis",
-    handle: "@chloedreams",
-    text: "The level of detail and care in the automated cover letters makes it the best tool I've ever used."
+    name: "Priya Sharma",
+    handle: "@priyadev",
+    text: "The automated cover letters and tailored matches are spot on — best tool I've used for job hunting."
   },
   {
-    name: "Oscar Bennett",
-    handle: "@oscarcreates",
-    text: "It has taken the stress out of managing job applications, allowing me to stay focused on prep."
+    name: "Rohit Verma",
+    handle: "@rohit_tests",
+    text: "It removed the stress of tracking dozens of applications so I can focus on interview prep."
   },
   {
-    name: "Zara Brooks",
-    handle: "@zarathinks",
-    text: "I appreciate how Applivo simplifies complex scraping tasks, making my career hunt enjoyable."
+    name: "Nisha Kapoor",
+    handle: "@nisha_ops",
+    text: "Applivo simplifies scraping and automation, making my career search far more efficient."
   }
 ];
 

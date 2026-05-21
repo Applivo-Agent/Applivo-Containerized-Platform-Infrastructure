@@ -145,8 +145,15 @@ async def razorpay_webhook(request: Request):
     logger.info(f"Razorpay webhook received: {event_type}")
 
     if event_type == "payment.captured":
-        razorpay_payment_id = payment_entity.get("id")
-        razorpay_order_id = order_entity.get("id")
+        # Extract from nested 'entity' if present, otherwise direct
+        p_data = payment_entity.get("entity", payment_entity)
+        o_data = order_entity.get("entity", order_entity)
+
+        razorpay_payment_id = p_data.get("id")
+        # Try to get order_id from payment entity first (more reliable)
+        razorpay_order_id = p_data.get("order_id") or o_data.get("id")
+
+        logger.info(f"Processing captured payment: {razorpay_payment_id} for order: {razorpay_order_id}")
 
         if razorpay_payment_id and razorpay_order_id:
             try:

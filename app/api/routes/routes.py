@@ -10,19 +10,19 @@ app/api/routes/chat.py          — AI assistant
 #  applications.py
 # ═══════════════════════════════════════════════════════════════════════════
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Body
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Body, Response
 from sqlalchemy import func, select, desc, delete, text, String, or_
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
 from app.models.user import User
-from app.models.application import Application, ApplicationEvent, ApplicationStatus
+from app.models.application import Application, ApplicationEvent, ApplicationStatus, ApplicationMethod
 from app.models.job import Job, JobAnalysis
 from app.models.platform_message import PlatformMessage
 from app.schemas import (
@@ -88,6 +88,67 @@ async def _table_has_column(db: AsyncSession, table_name: str, column_name: str)
 
 def _agent_task_namespace_from_row(row) -> SimpleNamespace:
     return SimpleNamespace(**dict(row._mapping))
+
+
+def _serialize_job(job: Job) -> dict:
+    return {
+        "id": job.id,
+        "source": getattr(job.source, "value", job.source),
+        "source_url": job.source_url,
+        "title": job.title,
+        "company_name": job.company_name,
+        "company_logo_url": job.company_logo_url,
+        "description_clean": job.description_clean,
+        "location": job.location,
+        "work_mode": getattr(job.work_mode, "value", job.work_mode),
+        "job_type": getattr(job.job_type, "value", job.job_type),
+        "experience_level": getattr(job.experience_level, "value", job.experience_level),
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "salary_currency": job.salary_currency,
+        "posted_at": job.posted_at,
+        "scraped_at": job.scraped_at,
+        "status": getattr(job.status, "value", job.status),
+        "is_active": job.is_active,
+        "applicant_count": job.applicant_count,
+        "easy_apply": job.easy_apply,
+        "analysis": None,
+        "created_at": job.created_at,
+    }
+
+
+def _serialize_application(app: Application, job: Optional[Job] = None) -> dict:
+    return {
+        "id": app.id,
+        "user_id": app.user_id,
+        "job_id": app.job_id,
+        "resume_id": app.resume_id,
+        "job": _serialize_job(job) if job is not None else None,
+        "status": getattr(app.status, "value", app.status),
+        "method": getattr(app.method, "value", app.method),
+        "applied_at": app.applied_at,
+        "viewed_at": app.viewed_at,
+        "shortlisted_at": app.shortlisted_at,
+        "offer_received_at": app.offer_received_at,
+        "rejected_at": app.rejected_at,
+        "match_score_at_apply": app.match_score_at_apply,
+        "job_title_snapshot": app.job_title_snapshot,
+        "company_snapshot": app.company_snapshot,
+        "recruiter_name": app.recruiter_name,
+        "recruiter_email": app.recruiter_email,
+        "follow_up_status": getattr(app.follow_up_status, "value", app.follow_up_status),
+        "follow_up_count": app.follow_up_count,
+        "interview_date": app.interview_date,
+        "interview_type": app.interview_type,
+        "interview_notes": app.interview_notes,
+        "offer_salary": app.offer_salary,
+        "notes": app.notes,
+        "is_starred": app.is_starred,
+        "bot_error": app.bot_error,
+        "retry_count": app.retry_count,
+        "created_at": app.created_at,
+        "updated_at": app.updated_at,
+    }
 
 
 @applications_router.get("", response_model=PaginatedResponse)
@@ -238,6 +299,7 @@ async def get_application(
 async def create_application(
     payload: ApplicationCreate,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -248,20 +310,63 @@ async def create_application(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    def _normalize_application_method(method_str: str):
+        from app.models.application import ApplicationMethod
+        if not method_str:
+            return ApplicationMethod.MANUAL
+        s = method_str.strip().upper().replace('-', '_')
+        try:
+            return ApplicationMethod(s)
+        except Exception:
+            if "AUTO" in s:
+                return ApplicationMethod.AUTO_BOT
+            if "EASY" in s:
+                return ApplicationMethod.EASY_APPLY
+            if "EMAIL" in s:
+                return ApplicationMethod.EMAIL
+            return ApplicationMethod.MANUAL
+
+    norm_method = _normalize_application_method(payload.method)
+
+    # Idempotency guard: if already present, return existing row instead of 500.
+    existing_result = await db.execute(
+        select(Application).where(
+            Application.user_id == current_user.id,
+            Application.job_id == payload.job_id,
+        )
+    )
+    existing_app = existing_result.scalar_one_or_none()
+    if existing_app:
+        response.status_code = 200
+        return _serialize_application(existing_app, job)
+
     app = Application(
         user_id=current_user.id,
         job_id=payload.job_id,
         resume_id=payload.resume_id,
         cover_letter_id=payload.cover_letter_id,
-        method=payload.method,
+        method=norm_method,
         notes=payload.notes,
         job_title_snapshot=job.title,
         company_snapshot=job.company_name,
-        status=ApplicationStatus.PENDING_APPROVAL if
-            payload.method == "auto_bot" else ApplicationStatus.APPLIED,
+        status=ApplicationStatus.PENDING_APPROVAL if norm_method == ApplicationMethod.AUTO_BOT else ApplicationStatus.APPLIED,
     )
     db.add(app)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        existing_result = await db.execute(
+            select(Application).where(
+                Application.user_id == current_user.id,
+                Application.job_id == payload.job_id,
+            )
+        )
+        existing_app = existing_result.scalar_one_or_none()
+        if existing_app:
+            response.status_code = 200
+            return _serialize_application(existing_app, job)
+        raise HTTPException(status_code=409, detail="Application already exists")
 
     # Log creation event
     event = ApplicationEvent(
@@ -269,58 +374,21 @@ async def create_application(
         event_type="application_created",
         to_status=app.status,
         triggered_by="user",
-        details={"method": payload.method},
+        details={"method": getattr(norm_method, 'value', str(norm_method))},
     )
     db.add(event)
     await db.commit()
     await db.refresh(app)
 
     # Trigger auto-apply bot if approved
-    if payload.method == "auto_bot" and current_user.profile and not current_user.profile.require_apply_approval:
-                has_user_scope = await _table_has_column(db, "agent_tasks", "user_id")
-                if not has_user_scope:
-                    try:
-                        await _ensure_agent_tasks_user_id_column(db)
-                        has_user_scope = await _table_has_column(db, "agent_tasks", "user_id")
-                    except Exception:
-                        await db.rollback()
-                        has_user_scope = False
+    if (
+        norm_method == ApplicationMethod.AUTO_BOT
+        and current_user.profile
+        and not current_user.profile.require_apply_approval
+    ):
+        background_tasks.add_task(_trigger_auto_apply, app.id)
 
-                # Look for today's recent tasks. Fall back if legacy DB misses agent_tasks.user_id.
-                if has_user_scope:
-                    try:
-                        await _ensure_agent_tasks_user_id_column(db)
-                        has_user_scope = await _table_has_column(db, "agent_tasks", "user_id")
-                    except Exception:
-                        await db.rollback()
-                        has_user_scope = False
-
-                # Look for today's recent tasks. Fall back if legacy DB misses agent_tasks.user_id.
-                else:
-                    result = await db.execute(
-                        select(
-                            AgentTask.id.label("id"),
-                            AgentTask.task_type.label("task_type"),
-                            AgentTask.status.label("status"),
-                            AgentTask.celery_task_id.label("celery_task_id"),
-                            AgentTask.payload.label("payload"),
-                            AgentTask.result.label("result"),
-                            AgentTask.error.label("error"),
-                            AgentTask.scheduled_at.label("scheduled_at"),
-                            AgentTask.started_at.label("started_at"),
-                            AgentTask.completed_at.label("completed_at"),
-                            AgentTask.duration_ms.label("duration_ms"),
-                            AgentTask.retry_count.label("retry_count"),
-                            AgentTask.max_retries.label("max_retries"),
-                            AgentTask.related_job_id.label("related_job_id"),
-                            AgentTask.related_application_id.label("related_application_id"),
-                            AgentTask.triggered_by.label("triggered_by"),
-                            AgentTask.created_at.label("created_at"),
-                            AgentTask.updated_at.label("updated_at"),
-                        )
-                        .where(func.date(AgentTask.created_at) == today)
-                        .order_by(desc(AgentTask.created_at))
-                    )
+    return _serialize_application(app, job)
 
 
 @applications_router.post("/{app_id}/approve", response_model=MessageResponse)
@@ -980,39 +1048,28 @@ async def get_agent_status(
                 .where(func.date(AgentTask.created_at) == today)
                 .order_by(desc(AgentTask.created_at))
             )
-            tasks_today = [_agent_task_namespace_from_row(row) for row in result.all()]
-            running = [t for t in tasks_today if t.status == AgentTaskStatus.RUNNING]
-            succeeded = [t for t in tasks_today if t.status == AgentTaskStatus.SUCCESS]
-            failed = [t for t in tasks_today if t.status == AgentTaskStatus.FAILED]
-
-            from app.models.job import Job
-            jobs_today = (await db.execute(
-                select(func.count(Job.id)).where(func.date(Job.scraped_at) == today)
-            )).scalar()
-
-            apps_today = (await db.execute(
-                select(func.count(Application.id))
-                .where(
-                    Application.user_id == current_user.id,
-                    func.date(Application.applied_at) == today,
-                )
-            )).scalar()
-
-            last_task = tasks_today[0] if tasks_today else None
-
-            return AgentStatusResponse(
-                is_running=len(running) > 0,
-                current_task=running[0].task_type if running else None,
-                last_run=last_task.created_at if last_task else None,
-                next_run_at=None,
-                tasks_today=len(tasks_today),
-                tasks_succeeded=len(succeeded),
-                tasks_failed=len(failed),
-                jobs_found_today=jobs_today or 0,
-                applications_today=apps_today or 0,
-            )
     tasks_today = result.scalars().all() if result is not None else []
 
+    # --- SELF-HEALING: Auto-clean stuck tasks ---
+    # If a task is RUNNING but older than 2 minutes, it's likely a zombie
+    two_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=2)
+    stuck_tasks = [t for t in tasks_today if t.status == AgentTaskStatus.RUNNING and t.started_at and t.started_at < two_mins_ago]
+    
+    if stuck_tasks:
+        for t in stuck_tasks:
+            t.status = AgentTaskStatus.FAILED
+            t.error = "Task timed out or worker crashed"
+            db.add(t)
+        await db.commit()
+        # Refresh the list
+        result = await db.execute(
+            select(AgentTask)
+            .where(AgentTask.user_id == current_user.id, func.date(AgentTask.created_at) == today)
+            .order_by(desc(AgentTask.created_at))
+        )
+        tasks_today = result.scalars().all()
+    # ---------------------------------------------
+    # Calculate metrics after self-healing
     running = [t for t in tasks_today if t.status == AgentTaskStatus.RUNNING]
     succeeded = [t for t in tasks_today if t.status == AgentTaskStatus.SUCCESS]
     failed = [t for t in tasks_today if t.status == AgentTaskStatus.FAILED]
@@ -1210,14 +1267,21 @@ async def run_manual_agent_task(task_type: str, user_id: str, payload: dict):
                 new_jobs = (await db.execute(query)).scalars().all()
 
                 for job in new_jobs:
-                    db.add(Application(
-                        user_id=user_id,
-                        job_id=job.id,
-                        status=ApplicationStatus.QUEUED,
-                        job_title_snapshot=job.title,
-                        company_snapshot=job.company_name,
-                    ))
-                    queued_count += 1
+                    try:
+                        async with db.begin_nested():
+                            db.add(Application(
+                                user_id=user_id,
+                                job_id=job.id,
+                                status=ApplicationStatus.QUEUED,
+                                job_title_snapshot=job.title,
+                                company_snapshot=job.company_name,
+                            ))
+                            await db.flush()
+                        queued_count += 1
+                        existing_job_ids.add(job.id)
+                    except IntegrityError:
+                        # Concurrent writer already inserted this (user_id, job_id); skip safely.
+                        continue
                 await db.commit()
             result = {"queued": queued_count, "threshold_used": threshold}
 
@@ -1271,14 +1335,21 @@ async def run_manual_agent_task(task_type: str, user_id: str, payload: dict):
                 )).scalars().all()
 
                 for job in new_jobs:
-                    db.add(Application(
-                        user_id=user_id,
-                        job_id=job.id,
-                        status=ApplicationStatus.QUEUED,
-                        job_title_snapshot=job.title,
-                        company_snapshot=job.company_name,
-                    ))
-                    queued_count += 1
+                    try:
+                        async with db.begin_nested():
+                            db.add(Application(
+                                user_id=user_id,
+                                job_id=job.id,
+                                status=ApplicationStatus.QUEUED,
+                                job_title_snapshot=job.title,
+                                company_snapshot=job.company_name,
+                            ))
+                            await db.flush()
+                        queued_count += 1
+                        existing_job_ids.add(job.id)
+                    except IntegrityError:
+                        # Concurrent writer already inserted this (user_id, job_id); skip safely.
+                        continue
                 await db.commit()
             result = {
                 "analyzed": analyzed,
@@ -1293,87 +1364,14 @@ async def run_manual_agent_task(task_type: str, user_id: str, payload: dict):
 
         # ── apply_queued (Staging Applications) ──────────────────────────────
         elif task_type == "apply_queued":
-            from app.models.application import Application, ApplicationStatus
-            from app.models.job import JobAnalysis
-            from app.agents.apply_bot import ApplyBot
-            from app.core.config import settings
+            from app.celery_tasks import apply_queued_batch
 
-            threshold = settings.AUTO_APPLY_MATCH_THRESHOLD
-            async with get_db_context() as db:
-                apps_to_run = (await db.execute(
-                    select(Application).where(
-                        Application.user_id == user_id,
-                        func.lower(Application.status.cast(String)) == ApplicationStatus.QUEUED.value.lower()
-                    ).outerjoin(
-                        JobAnalysis, Application.job_id == JobAnalysis.job_id
-                    ).where(
-                        (JobAnalysis.match_score >= threshold) | (JobAnalysis.match_score == None)
-                    ).limit(15)
-                )).scalars().all()
-                
-                app_ids = [a.id for a in apps_to_run]
-                
-                if not app_ids:
-                    result = {"applied": 0, "skipped": 0, "failed": 0, "message": "No jobs in queue"}
-                else:
-                    bot = ApplyBot()
-                    applied_count = 0
-                    skipped_count = 0
-                    failed_count = 0
-                    results = []
-                    
-                    for app_id in app_ids:
-                        try:
-                            # ApplyBot.apply has its own internal session management, 
-                            # but we wrap the loop in one here for general safety.
-                            r = await bot.apply(app_id)
-                            results.append({"id": app_id, **r})
-                            
-                            if r.get("success"):
-                                if r.get("already_applied"):
-                                    app = await db.get(Application, app_id)
-                                    if app:
-                                        app.status = ApplicationStatus.APPLIED
-                                        app.applied_at = datetime.now(timezone.utc)
-                                        db.add(app)
-                                        await db.commit()
-                                    log.info("Already applied - synced", app_id=app_id)
-                                else:
-                                    applied_count += 1
-                                    log.info("Applied", app_id=app_id)
-                            elif r.get("ineligible"):
-                                skipped_count += 1
-                                app = await db.get(Application, app_id)
-                                if app:
-                                    app.status = ApplicationStatus.SKIPPED
-                                    app.bot_error = r.get("error", "Not eligible")
-                                    db.add(app)
-                                    await db.commit()
-                                log.warning("Job not eligible - marked as SKIPPED", app_id=app_id)
-                            elif r.get("error") and "external" in r.get("error", "").lower():
-                                failed_count += 1
-                                app = await db.get(Application, app_id)
-                                if app:
-                                    app.status = ApplicationStatus.FAILED
-                                    app.bot_error = r.get("error", "External posting")
-                                    app.retry_count = 999
-                                    db.add(app)
-                                    await db.commit()
-                                log.warning("External job - marked as FAILED", app_id=app_id)
-                            else:
-                                failed_count += 1
-                                log.warning("Apply failed", app_id=app_id, error=r.get("error"))
-                        except Exception as exc:
-                            failed_count += 1
-                            log.error("Apply exception", app_id=app_id, error=str(exc))
-
-                    result = {
-                        "applied": applied_count,
-                        "failed": failed_count,
-                        "skipped": skipped_count,
-                        "total_queued": len(app_ids),
-                        "results": results
-                    }
+            async_result = apply_queued_batch.apply_async(args=[user_id], queue="apply")
+            result = {
+                "queued": True,
+                "celery_task_id": async_result.id,
+                "message": "apply_queued dispatched to browser worker",
+            }
 
         # Update task as success
         elapsed = round(time.perf_counter() - t0, 1)

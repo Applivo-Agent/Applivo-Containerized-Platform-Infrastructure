@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.celery_app import celery_app
+from app.celery_tasks import _run_async
 
 logger = structlog.get_logger(__name__)
 
@@ -50,7 +51,7 @@ def scrape_internshala_task(**kwargs):
         scraper = InternshalaScraper()
         return await _retry(scraper.run, label="internshala_scrape")
     
-    results = asyncio.run(_run())
+    results = _run_async(_run())
     logger.info("Internshala scrape complete", jobs_found=results.get('jobs_found', 0))
     return results
 
@@ -68,7 +69,7 @@ def analyze_new_jobs_batch_task():
         return await JobAnalyzerService().analyze_new_batch()
     
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Batch analysis complete", analyzed=result.get('analyzed', 0))
         return result
     except Exception as exc:
@@ -88,7 +89,7 @@ def auto_apply_task(application_id: str):
     async def _run():
         return await ApplyBot().apply(application_id)
         
-    result = asyncio.run(_run())
+    result = _run_async(_run())
     logger.info("Auto-apply task complete", 
                 application_id=application_id, 
                 success=result.get('success'), 
@@ -105,7 +106,7 @@ def queue_auto_applications_task():
         return await ApplicationService().queue_batch_applications()
         
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Batch application queuing complete", queued=result.get('queued', 0))
         return result
     except Exception as exc:
@@ -127,7 +128,7 @@ def generate_resume_task(user_id: str, job_id: str, base_resume_id: Optional[str
         return await service.generate_tailored(user_id, job_id, base_resume_id)
         
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Resume generation complete", 
                    user_id=user_id, 
                    job_id=job_id, 
@@ -153,7 +154,7 @@ def send_telegram_notification(notification_id: str):
             notification_id,
             label="telegram_notify",
         )
-    return asyncio.run(_run())
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.agents.tasks.send_email_notification")
@@ -167,7 +168,7 @@ def send_email_notification(notification_id: str):
             notification_id,
             label="email_notify",
         )
-    return asyncio.run(_run())
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.agents.tasks.send_daily_digest_task")
@@ -179,7 +180,7 @@ def send_daily_digest_task():
         return await NotificationService().send_daily_digest()
         
     try:
-        return asyncio.run(_run())
+        return _run_async(_run())
     except Exception as exc:
         logger.error("Daily digest failed", error=str(exc))
 
@@ -197,7 +198,7 @@ def check_follow_ups():
         return await FollowUpService().process_due_follow_ups()
         
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Follow-ups processed", count=result)
         return result
     except Exception as exc:
@@ -217,7 +218,7 @@ def check_email_inbox():
         return {"checked": True, "messages_found": len(messages)}
         
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Email inbox check complete", found=result.get("messages_found", 0))
         return result
     except Exception as exc:
@@ -260,7 +261,7 @@ def generate_cover_letter_task(user_id: str, job_id: str, tone: str = "professio
         return await CoverLetterService().generate(user_id, job_id, tone)
         
     try:
-        result = asyncio.run(_run())
+        result = _run_async(_run())
         logger.info("Cover letter generated", 
                    user_id=user_id, 
                    job_id=job_id, 
@@ -309,7 +310,7 @@ def check_expiring_subscriptions():
             
             return {"checked": len(expiring)}
             
-    return asyncio.run(_run())
+    return _run_async(_run())
 
 
 # ── Task Registry (for API triggering) ──────────────────────────────────────

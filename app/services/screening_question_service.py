@@ -10,23 +10,18 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import structlog
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db_context
-from app.models.application import Application, ApplicationEvent, ApplicationStatus
+from app.models.application import Application, ApplicationStatus
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user import UserProfile, UserSkill
+from app.services.ai_router import ai_router
 
 logger = structlog.get_logger()
-
-client = AsyncOpenAI(
-    api_key=settings.ai_api_key,
-    base_url="https://api.groq.com/openai/v1",
-)
 
 
 class ScreeningQuestionService:
@@ -140,7 +135,7 @@ Respond with a JSON object:
 """
 
         try:
-            response = await client.chat.completions.create(
+            response = await ai_router.chat_completions_create(
                 model=settings.OPENAI_MODEL_LIGHT,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -148,11 +143,13 @@ Respond with a JSON object:
                 ],
                 temperature=0.3,
                 max_tokens=500,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                user_id=self.user_id,
+                endpoint="/api/screening/answer",
             )
             
             import json
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response["content"])
             
             return {
                 "question": question,
@@ -188,7 +185,7 @@ Respond with a JSON object:
         Only answer based on the user's actual experience."""
         
         try:
-            response = await client.chat.completions.create(
+            response = await ai_router.chat_completions_create(
                 model=settings.OPENAI_MODEL_LIGHT,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -196,9 +193,11 @@ Respond with a JSON object:
                 ],
                 temperature=0.3,
                 max_tokens=300,
+                user_id=self.user_id,
+                endpoint="/api/screening/generate-answer",
             )
             
-            return response.choices[0].message.content
+            return response["content"]
         except Exception as e:
             logger.error("Failed to generate answer", error=str(e))
             return "Please answer this question based on your profile."

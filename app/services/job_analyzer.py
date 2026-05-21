@@ -110,7 +110,7 @@ class JobAnalyzerService:
 
             batch_count += 1
             try:
-                results, batch_tokens = await self._analyze_batch_with_usage(batch)
+                results, batch_tokens = await self._analyze_batch_with_usage(batch, user_id=user_id)
                 tokens_used_total += int(batch_tokens or 0)
                 for job, analysis in zip(batch, results):
                     if analysis:
@@ -186,7 +186,10 @@ class JobAnalyzerService:
             batch = jobs_list[i:i + BATCH_SIZE]
             batch_count += 1
             try:
-                results = await self._analyze_batch(batch)
+                # Grouping by user_id to ensure correct tracking for AIRouter
+                # Since we process 5 at a time, we just use the user_id of the first job in batch
+                current_user_id = batch[0].user_id if batch else None
+                results = await self._analyze_batch(batch, user_id=current_user_id)
                 for job, analysis in zip(batch, results):
                     if analysis:
                         await self._save_analysis(job, analysis)
@@ -198,14 +201,14 @@ class JobAnalyzerService:
 
     async def _analyze_single(self, job: Job) -> dict:
         """Analyze a single job description."""
-        return (await self._analyze_batch([job]))[0] or self._empty_analysis()
+        return (await self._analyze_batch([job], user_id=job.user_id))[0] or self._empty_analysis()
 
-    async def _analyze_batch(self, jobs: list) -> list:
+    async def _analyze_batch(self, jobs: list, user_id: str = None) -> list:
         """Analyze a batch and return only job-wise analysis payloads."""
-        results, _ = await self._analyze_batch_with_usage(jobs)
+        results, _ = await self._analyze_batch_with_usage(jobs, user_id=user_id)
         return results
 
-    async def _analyze_batch_with_usage(self, jobs: list) -> tuple[list, int]:
+    async def _analyze_batch_with_usage(self, jobs: list, user_id: str = None) -> tuple[list, int]:
         """Analyze a batch of jobs in one API call using title-only metadata."""
         if not jobs:
             return [], 0
@@ -239,6 +242,8 @@ class JobAnalyzerService:
                 model=settings.OPENAI_MODEL_LIGHT,
                 max_tokens=max_tokens,
                 temperature=0.1,
+                user_id=user_id,
+                endpoint="/api/agent/analyze",
             )
             
             content = result["content"]

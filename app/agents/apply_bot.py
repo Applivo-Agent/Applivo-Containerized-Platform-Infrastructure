@@ -31,6 +31,23 @@ from app.agents.apply_bot_internshala import apply_internshala
 logger = structlog.get_logger()
 
 
+def _browser_headless() -> bool:
+    """Return a safe Playwright headless setting for the worker.
+
+    The worker runs in Docker without a GUI, so we treat headless mode as the
+    default and only attempt headed mode when explicitly disabled and a display
+    is actually available.
+    """
+    import os
+
+    headless_env = os.environ.get("BROWSER_HEADLESS")
+    if headless_env is not None:
+        return headless_env.strip().lower() in ("1", "true", "yes", "on")
+
+    # No explicit override: force headless when the container has no display.
+    return not bool(os.environ.get("DISPLAY"))
+
+
 class ApplyBot:
     """
     Playwright-based job application bot.
@@ -338,32 +355,89 @@ class ApplyBot:
             from playwright.async_api import async_playwright
 
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=settings.BROWSER_HEADLESS,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--disable-setuid-sandbox",
-                        "--disable-infobars",
-                        "--window-size=1366,768",
-                        "--disable-extensions",
-                    ],
-                )
-                context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    viewport={"width": 1366, "height": 768},
+                import os
+                persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR")
+                import random as _rand
+                _chrome_ver = _rand.choice(["122", "123", "124"])
+                _ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_chrome_ver}.0.0.0 Safari/537.36"
+                _w, _h = _rand.choice([(1366, 768), (1440, 900), (1536, 864), (1920, 1080)])
+                launch_args = [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--disable-web-security",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                    "--disable-gpu",
+                    f"--window-size={_w},{_h}",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                    "--no-first-run",
+                    "--password-store=basic",
+                    "--use-mock-keychain",
+                    f"--user-agent={_ua}",
+                ]
+                context_kwargs = dict(
+                    user_agent=_ua,
+                    viewport={"width": _w, "height": _h},
                     locale="en-IN",
                     timezone_id="Asia/Kolkata",
+                    permissions=["geolocation", "notifications"],
+                    geolocation={"latitude": 12.9716 + _rand.uniform(-0.05, 0.05), "longitude": 77.5946 + _rand.uniform(-0.05, 0.05)},
+                    accept_downloads=True,
+                    extra_http_headers={
+                        "Accept-Language": "en-IN,en-GB;q=0.9,en;q=0.8",
+                        "sec-ch-ua": f'"Chromium";v="{_chrome_ver}", "Google Chrome";v="{_chrome_ver}", "Not-A.Brand";v="99"',
+                        "sec-ch-ua-mobile": "?0",
+                        "sec-ch-ua-platform": '"Windows"',
+                    },
                 )
+                # Add proxy only when explicitly configured. Do not fall back to
+                # DataImpulse by default, because that causes cookie/IP mismatch.
+                proxy_server = os.environ.get("BROWSER_PROXY_SERVER")
+                proxy_user = os.environ.get("BROWSER_PROXY_USER")
+                proxy_pass = os.environ.get("BROWSER_PROXY_PASS")
+
+                if proxy_server:
+                    proxy_dict = {"server": proxy_server}
+                    if proxy_user:
+                        proxy_dict["username"] = proxy_user
+                    if proxy_pass:
+                        proxy_dict["password"] = proxy_pass
+                    context_kwargs["proxy"] = proxy_dict
+                    logger.info("Using configured browser proxy", server=proxy_server, user=proxy_user)
+                else:
+                    logger.info("Browser proxy disabled")
+
+                if persistent_dir:
+                    from pathlib import Path
+                    try:
+                        Path(persistent_dir).mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        pass
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=persistent_dir,
+                        headless=_browser_headless(),
+                        args=launch_args,
+                        **context_kwargs,
+                    )
+                    browser = context.browser
+                else:
+                    browser = await p.chromium.launch(
+                        headless=_browser_headless(),
+                        args=launch_args,
+                    )
+                    context = await browser.new_context(**context_kwargs)
+                
+                context.set_default_timeout(60000)
 
                 await context.add_init_script("""
                     () => {
+                        // 1. Hide webdriver flag
                         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+                        // 2. Realistic plugins
                         Object.defineProperty(navigator, 'plugins', {
                             get: () => {
                                 var arr = [
@@ -378,8 +452,67 @@ class ApplyBot:
                                 return arr;
                             }
                         });
+
+                        // 3. Languages
                         Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-GB', 'en'] });
-                        window.chrome = { app: { isInstalled: false }, runtime: {} };
+
+                        // 4. Full Chrome runtime object
+                        window.chrome = {
+                            app: {
+                                isInstalled: false,
+                                InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                                RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
+                            },
+                            runtime: {
+                                connect: function() {},
+                                sendMessage: function() {}
+                            },
+                            loadTimes: function() {},
+                            csi: function() {},
+                        };
+
+                        // 5. Hardware concurrency (real machines: 4-16)
+                        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+
+                        // 6. Device memory (real machines: 4-16 GB)
+                        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+                        // 7. WebGL — spoof real GPU vendor/renderer
+                        const getParameter = WebGLRenderingContext.prototype.getParameter;
+                        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                            if (parameter === 37445) return 'Intel Inc.';
+                            if (parameter === 37446) return 'Intel(R) UHD Graphics 620';
+                            return getParameter.call(this, parameter);
+                        };
+
+                        // 8. Permissions API — prevent automation detection
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (parameters) => (
+                            parameters.name === 'notifications'
+                                ? Promise.resolve({ state: Notification.permission })
+                                : originalQuery(parameters)
+                        );
+
+                        // 9. Battery API — real browsers expose this
+                        if (!navigator.getBattery) {
+                            navigator.getBattery = () => Promise.resolve({
+                                charging: true, chargingTime: 0,
+                                dischargingTime: Infinity, level: 1.0
+                            });
+                        }
+
+                        // 10. Screen color/pixel depth
+                        Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+                        Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+
+                        // 11. Hide automation in toString
+                        const originalToString = Function.prototype.toString;
+                        Function.prototype.toString = function() {
+                            if (this === window.navigator.permissions.query) {
+                                return 'function query() { [native code] }';
+                            }
+                            return originalToString.call(this);
+                        };
                     }
                 """)
 
@@ -390,7 +523,7 @@ class ApplyBot:
                     logger.info("Detected ATS", ats=ats, url=job.source_url)
 
                     if ats == "internshala":
-                        result = await apply_internshala(page, job, profile, resume, settings, user_id=app.user_id)
+                        result = await apply_internshala(page, job, profile, resume, settings, user_id=app.user_id, user_full_name=user_full_name)
                     elif ats == "linkedin":
                         result = await self._apply_linkedin(page, job, profile, resume)
                     elif ats == "greenhouse":
@@ -426,8 +559,15 @@ class ApplyBot:
                         "error": error_str,
                     }
                 finally:
-                    await browser.close()
-
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+                    if browser:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
         except ImportError:
             logger.error("Playwright not installed. Run: pip install playwright && playwright install chromium")
             return {"success": False, "error": "Playwright not installed"}

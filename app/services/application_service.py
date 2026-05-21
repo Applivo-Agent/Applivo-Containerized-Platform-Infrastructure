@@ -10,6 +10,7 @@ Respects daily limits, approval settings, match thresholds, and subscription quo
 from typing import Optional
 
 import structlog
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, func, desc
 from datetime import datetime, timezone, date
 
@@ -79,15 +80,13 @@ class ApplicationService:
         if remaining <= 0:
             return {"user_id": user.id, "queued": 0, "reason": f"Daily limit of {daily_limit} reached"}
 
-        # Find already-applied job IDs to exclude
+        # Exclude any job that already has an application row for this user.
+        # The unique constraint is global across statuses, so filtering only
+        # the active statuses still allows duplicate inserts for older FAILED
+        # or SKIPPED rows.
         applied_job_ids = (await db.execute(
             select(Application.job_id).where(
                 Application.user_id == user.id,
-                Application.status.in_([
-                    ApplicationStatus.APPLIED,
-                    ApplicationStatus.QUEUED,
-                    ApplicationStatus.PENDING_APPROVAL,
-                ])
             )
         )).scalars().all()
 
@@ -97,23 +96,29 @@ class ApplicationService:
             else settings.AUTO_APPLY_MATCH_THRESHOLD
         )
 
+        queued_job_ids = set(applied_job_ids)
+
         # Find top qualifying jobs
         result = await db.execute(
             select(Job)
+            .distinct(Job.id)
             .join(JobAnalysis, Job.id == JobAnalysis.job_id)
             .where(
                 Job.is_active == True,
-                Job.status == JobStatus.ANALYZED,
+                Job.status == JobStatus.ANALYZED.value,
                 JobAnalysis.match_score >= threshold,
                 ~Job.id.in_(applied_job_ids),
             )
-            .order_by(desc(JobAnalysis.priority_score))
+            .order_by(Job.id, desc(JobAnalysis.priority_score))
             .limit(remaining)
         )
         jobs = result.scalars().all()
 
         queued = 0
         for job in jobs:
+            if job.id in queued_job_ids:
+                logger.info("Skipping already queued job", user_id=user.id, job_id=job.id)
+                continue
             try:
                 resume = await self._find_best_resume(db, user.id, job)
 
@@ -139,9 +144,17 @@ class ApplicationService:
                 )
                 db.add(app)
                 queued += 1
+                queued_job_ids.add(job.id)
 
                 if not profile.require_apply_approval:
-                    await db.flush()
+                    try:
+                        await db.flush()
+                    except IntegrityError:
+                        await db.rollback()
+                        logger.warning("Duplicate application detected during flush; skipping", user_id=user.id, job_id=job.id)
+                        queued -= 1
+                        queued_job_ids.discard(job.id)
+                        continue
                     # Run full auto-apply using the bot
                     try:
                         from app.agents.apply_bot import ApplyBot

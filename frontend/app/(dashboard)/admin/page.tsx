@@ -1,8 +1,8 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { 
+import {
   Users, Activity, Shield, BarChart3, Globe, Zap,
-  AlertCircle, CheckCircle2, Settings, Database, DollarSign, 
+  AlertCircle, CheckCircle2, Settings, Database, DollarSign,
   Briefcase, TrendingUp, Server, Pause, Play, RotateCcw,
   Trash2, Search, Filter, MoreHorizontal, X, Check,
   ToggleLeft, FileText, History, Cpu, Loader2,
@@ -314,7 +314,7 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [loading, setLoading] = useState(true);
-  
+
   // Data states
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -331,7 +331,7 @@ export default function AdminDashboard() {
   const [llmUsage, setLlmUsage] = useState<LLMUsageData | null>(null);
   const [failedJobs, setFailedJobs] = useState<any[]>([]);
   const [platformMessages, setPlatformMessages] = useState<any[]>([]);
-  
+
   // Search/filter states
   const [userSearch, setUserSearch] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -340,18 +340,18 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!user || !user.is_superuser) return;
     if (activeTab !== "users") {
-        loadTabData(activeTab);
+      loadTabData(activeTab);
     }
   }, [user, activeTab]);
 
   // 2. Specialized User Search (runs on search input with debounce)
   useEffect(() => {
     if (!user || !user.is_superuser || activeTab !== "users") return;
-    
+
     const timeout = setTimeout(() => {
-        loadTabData("users", userSearch);
+      loadTabData("users", userSearch);
     }, 500);
-    
+
     return () => clearTimeout(timeout);
   }, [user, activeTab, userSearch]);
 
@@ -510,7 +510,7 @@ export default function AdminDashboard() {
     );
   }
 
-  const filteredUsers = users.filter(u => 
+  const filteredUsers = users.filter(u =>
     u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.full_name.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.id.toLowerCase().includes(userSearch.toLowerCase())
@@ -528,7 +528,7 @@ export default function AdminDashboard() {
           <p className="text-sm text-zinc-400 mt-1">System operations and infrastructure management</p>
         </div>
       </div>
-      
+
       <style jsx global>{`
         .admin-panel [class*="bg-[#0b0b0f]"] {
           background-color: #1c1c1e !important;
@@ -546,55 +546,54 @@ export default function AdminDashboard() {
       `}</style>
       <div className="max-w-[1400px] mx-auto space-y-8">
 
-      {/* Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        {TABS.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-3 py-2 text-[11px] font-black uppercase tracking-widest whitespace-nowrap transition-all border-b-2 ${
-              activeTab === tab.id 
-                ? "border-white text-white" 
-                : "border-transparent text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      {loading ? (
-        <div className="-card p-12 text-center">
-          <div className="w-8 h-8 border-2 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-muted-foreground mt-4">Loading...</p>
+        {/* Tabs */}
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-3 py-2 text-[11px] font-black uppercase tracking-widest whitespace-nowrap transition-all border-b-2 ${activeTab === tab.id
+                  ? "border-white text-white"
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
+                }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          ))}
         </div>
-      ) : (
-        <>
-          {activeTab === "dashboard" && <DashboardTab stats={stats} botStats={botStats} queueStats={queueStats} health={systemHealth} failedJobs={failedJobs} onAction={runSystemAction} loading={loading} />}
-          {activeTab === "ai-metrics" && <AIMetricsTab llmUsage={llmUsage} />}
-          {activeTab === "users" && <UsersTab users={filteredUsers} search={userSearch} setSearch={setUserSearch} actionLoading={actionLoading} onAction={handleUserAction} />}
-          {activeTab === "subscriptions" && <SubscriptionsTab subscriptions={subscriptions} />}
-          {activeTab === "payments" && <PaymentsTab payments={payments} />}
-          {activeTab === "applications" && <ApplicationsTab applications={applications} />}
-          {activeTab === "jobs" && <JobsTab jobs={jobs} />}
-          {activeTab === "bot" && <BotTab stats={botStats} />}
-          {activeTab === "queue" && <QueueTab stats={queueStats} />}
-          {activeTab === "errors" && <ErrorsTab failedJobs={failedJobs} setFailedJobs={setFailedJobs} loading={loading} />}
-          {activeTab === "analytics" && <AnalyticsTab data={analyticsData} />}
-          {activeTab === "features" && <FeaturesTab flags={featureFlags} />}
-          {activeTab === "audit" && <AuditTab logs={auditLogs} />}
-          {activeTab === "settings" && <SettingsTab health={systemHealth} onAction={runSystemAction} loading={loading} />}
-        </>
-      )}
+
+        {/* Tab Content */}
+        {loading ? (
+          <div className="-card p-12 text-center">
+            <div className="w-8 h-8 border-2 border-brand-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-muted-foreground mt-4">Loading...</p>
+          </div>
+        ) : (
+          <>
+            {activeTab === "dashboard" && <DashboardTab stats={stats} botStats={botStats} queueStats={queueStats} health={systemHealth} failedJobs={failedJobs} onAction={runSystemAction} loading={loading} />}
+            {activeTab === "ai-metrics" && <AIMetricsTab llmUsage={llmUsage} />}
+            {activeTab === "users" && <UsersTab users={filteredUsers} search={userSearch} setSearch={setUserSearch} actionLoading={actionLoading} onAction={handleUserAction} />}
+            {activeTab === "subscriptions" && <SubscriptionsTab subscriptions={subscriptions} />}
+            {activeTab === "payments" && <PaymentsTab payments={payments} />}
+            {activeTab === "applications" && <ApplicationsTab applications={applications} />}
+            {activeTab === "jobs" && <JobsTab jobs={jobs} />}
+            {activeTab === "bot" && <BotTab stats={botStats} />}
+            {activeTab === "queue" && <QueueTab stats={queueStats} />}
+            {activeTab === "errors" && <ErrorsTab failedJobs={failedJobs} setFailedJobs={setFailedJobs} loading={loading} />}
+            {activeTab === "analytics" && <AnalyticsTab data={analyticsData} />}
+            {activeTab === "features" && <FeaturesTab flags={featureFlags} />}
+            {activeTab === "audit" && <AuditTab logs={auditLogs} />}
+            {activeTab === "settings" && <SettingsTab health={systemHealth} onAction={runSystemAction} loading={loading} />}
+          </>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
 }
 
-function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onAction, loading }: { 
-  stats: Stats | null; 
+function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onAction, loading }: {
+  stats: Stats | null;
   botStats: BotStats | null;
   queueStats: QueueStats | null;
   health: SystemHealth | null;
@@ -604,7 +603,7 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
 }) {
   const isBotRunning = botStats?.status === "running" || botStats?.status === "active";
   const isSchedulerRunning = queueStats?.scheduler_running;
-  
+
   const healthItems = health?.checks ? Object.entries(health.checks).map(([name, status]) => ({
     name: name.charAt(0).toUpperCase() + name.slice(1),
     status: status === "healthy" || status === "available" || status === "running",
@@ -638,16 +637,16 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
               <div className="flex-1">
                 <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">{s.name}</div>
                 <div className="flex items-center gap-2">
-                   <span className={cn(
-                     "text-sm font-semibold tracking-tight",
-                     s.status ? "text-emerald-400" : "text-red-400"
-                   )}>
-                     {s.status ? "Online" : "Offline"}
-                   </span>
-                   <div className={cn(
-                     "w-1.5 h-1.5 rounded-full animate-pulse",
-                     s.status ? "bg-emerald-400" : "bg-red-400"
-                   )} />
+                  <span className={cn(
+                    "text-sm font-semibold tracking-tight",
+                    s.status ? "text-emerald-400" : "text-red-400"
+                  )}>
+                    {s.status ? "Online" : "Offline"}
+                  </span>
+                  <div className={cn(
+                    "w-1.5 h-1.5 rounded-full animate-pulse",
+                    s.status ? "bg-emerald-400" : "bg-red-400"
+                  )} />
                 </div>
               </div>
             </div>
@@ -666,9 +665,9 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
               <div className={cn(
                 "text-[10px] font-bold italic",
                 met.label === "Bot Status" && met.value === "Running" ? "text-blue-400" :
-                met.label === "Success Rate" ? "text-emerald-400" :
-                met.label === "Failed Jobs" && typeof met.value === "number" && met.value > 0 ? "text-red-400" : 
-                "text-gray-600"
+                  met.label === "Success Rate" ? "text-emerald-400" :
+                    met.label === "Failed Jobs" && typeof met.value === "number" && met.value > 0 ? "text-red-400" :
+                      "text-gray-600"
               )}>
                 {met.sub}
               </div>
@@ -681,7 +680,7 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
       <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
         <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-6">Manual Controls</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <button 
+          <button
             onClick={() => onAction('run-scraper')}
             className="flex items-center gap-4 px-6 py-4 bg-[#202024] border border-white/10 rounded-xl hover:bg-white/[0.05] hover:border-white/20 transition-all group text-left"
           >
@@ -694,7 +693,7 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
             </div>
           </button>
 
-          <button 
+          <button
             onClick={() => onAction('clear-queue')}
             className="flex items-center gap-4 px-6 py-4 bg-[#202024] border border-white/10 rounded-xl hover:bg-white/[0.05] hover:border-white/20 transition-all group text-left"
           >
@@ -707,7 +706,7 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
             </div>
           </button>
 
-          <button 
+          <button
             onClick={() => onAction('restart-worker')}
             className="flex items-center gap-4 px-6 py-4 bg-[#202024] border border-white/10 rounded-xl hover:bg-white/[0.05] hover:border-white/20 transition-all group text-left"
           >
@@ -744,7 +743,7 @@ function DashboardTab({ stats, botStats, queueStats, health, failedJobs, onActio
                     <div className="w-12 h-12 rounded-full bg-white/[0.02] border border-white/5 flex items-center justify-center mx-auto mb-4">
                       <CheckCircle2 className="w-5 h-5 text-emerald-500/30" />
                     </div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-1">Zero Failure Events / Operational</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-1">Zero Failure Events / Operational</p>
                     <p className="text-[10px] font-bold text-zinc-800 uppercase tracking-widest italic leading-relaxed">System cluster fully synchronized. No intervention required.</p>
                   </td>
                 </tr>
@@ -796,7 +795,12 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
     <div className="space-y-6">
       <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">User Management</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">User Management</h3>
+            <span className="px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/10 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+              {users.length} Users
+            </span>
+          </div>
           <div className="relative max-w-sm w-full group">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
             <input
@@ -805,7 +809,7 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
             />
           </div>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -827,11 +831,10 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
                     <div className="text-[11px] font-medium text-gray-600 tracking-tight">{user.email}</div>
                   </td>
                   <td className="py-4 px-4">
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-[0.1em] border ${
-                      user.is_superuser
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-[0.1em] border ${user.is_superuser
                         ? 'bg-white text-black border-white'
                         : 'bg-zinc-900 text-white border-white/20'
-                    }`}>
+                      }`}>
                       {user.is_superuser ? 'admin' : 'user'}
                     </span>
                     <div className="text-[9px] font-bold text-gray-600 uppercase mt-1 tracking-widest">
@@ -852,9 +855,9 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-1 bg-white/[0.03] rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-blue-400" 
-                            style={{ width: `${user.ai_credits_limit > 0 ? Math.min(100, (user.ai_credits_used / user.ai_credits_limit) * 100) : 0}%` }} 
+                          <div
+                            className="h-full bg-blue-400"
+                            style={{ width: `${user.ai_credits_limit > 0 ? Math.min(100, (user.ai_credits_used / user.ai_credits_limit) * 100) : 0}%` }}
                           />
                         </div>
                         <div className="text-[10px] font-black text-white/90 tabular-nums">
@@ -864,8 +867,8 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all">
-                         <div className="text-[9px] font-black uppercase tracking-widest text-gray-500">Tokens:</div>
-                         <div className="text-[10px] font-bold text-white">{((user.total_tokens || 0) / 1000).toFixed(1)}k</div>
+                        <div className="text-[9px] font-black uppercase tracking-widest text-gray-500">Tokens:</div>
+                        <div className="text-[10px] font-bold text-white">{((user.total_tokens || 0) / 1000).toFixed(1)}k</div>
                       </div>
                     </div>
                   </td>
@@ -899,7 +902,12 @@ function UsersTab({ users, search, setSearch, actionLoading, onAction }: {
 function SubscriptionsTab({ subscriptions }: { subscriptions: Subscription[] }) {
   return (
     <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-      <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-6 px-1">Active Subscriptions</h3>
+      <div className="flex items-center gap-3 mb-6 px-1">
+        <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">Active Subscriptions</h3>
+        <span className="px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/10 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+          {subscriptions.length} Plans
+        </span>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
@@ -917,11 +925,10 @@ function SubscriptionsTab({ subscriptions }: { subscriptions: Subscription[] }) 
               <tr key={sub.id} className="hover:bg-white/[0.02] transition-colors group">
                 <td className="py-4 px-4 first:pl-0 text-[13px] font-semibold text-white/90">{sub.user_email}</td>
                 <td className="py-4 px-4">
-                  <span className={`px-2.5 py-1 rounded-[4px] text-[10px] font-black uppercase tracking-widest shadow-sm ${
-                    sub.plan === 'premium' ? 'bg-white text-black border border-white' :
-                    sub.plan === 'pro' ? 'bg-zinc-900 text-white border border-white/20' :
-                    'bg-[#202024] text-gray-500 border border-white/[0.05]'
-                  }`}>
+                  <span className={`px-2.5 py-1 rounded-[4px] text-[10px] font-black uppercase tracking-widest shadow-sm ${sub.plan === 'premium' ? 'bg-white text-black border border-white' :
+                      sub.plan === 'pro' ? 'bg-zinc-900 text-white border border-white/20' :
+                        'bg-[#202024] text-gray-500 border border-white/[0.05]'
+                    }`}>
                     {sub.plan}
                   </span>
                 </td>
@@ -948,8 +955,8 @@ function SubscriptionsTab({ subscriptions }: { subscriptions: Subscription[] }) 
 
 function PaymentsTab({ payments }: { payments: Payment[] }) {
   const [search, setSearch] = useState("");
-  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-IN', { 
-    style: 'currency', currency: 'INR', minimumFractionDigits: 0 
+  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-IN', {
+    style: 'currency', currency: 'INR', minimumFractionDigits: 0
   }).format(amount / 100);
 
   const filteredPayments = payments.filter((payment) => {
@@ -964,11 +971,16 @@ function PaymentsTab({ payments }: { payments: Payment[] }) {
       payment.razorpay_order_id || "",
     ].some((value) => String(value).toLowerCase().includes(query));
   });
-  
+
   return (
     <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
       <div className="flex items-center justify-between gap-4 mb-6 px-1">
-        <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">Payment History</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">Payment History</h3>
+          <span className="px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/10 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+            {payments.length} Payments
+          </span>
+        </div>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -994,14 +1006,13 @@ function PaymentsTab({ payments }: { payments: Payment[] }) {
                   <div className="text-[10px] font-bold text-gray-700 uppercase leading-none mt-1">Transaction ID: {payment.razorpay_payment_id || payment.razorpay_order_id || payment.id}</div>
                 </td>
                 <td className="py-4 px-4">
-                   <div className="text-[13px] font-black text-white">{formatCurrency(payment.amount)}</div>
+                  <div className="text-[13px] font-black text-white">{formatCurrency(payment.amount)}</div>
                 </td>
                 <td className="py-4 px-4">
-                  <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest border transition-all ${
-                    payment.status === 'captured' ? 'bg-emerald-400 text-black border-emerald-400' : 
-                    payment.status === 'failed' ? 'bg-red-400/10 text-red-400 border-red-400/20' :
-                    'bg-[#202024] text-gray-500 border-white/[0.05]'
-                  }`}>
+                  <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest border transition-all ${['captured', 'success'].includes(payment.status.toLowerCase()) ? 'bg-emerald-400 text-black border-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.3)]' :
+                      payment.status.toLowerCase() === 'failed' ? 'bg-red-400/10 text-red-400 border-red-400/20' :
+                        'bg-[#202024] text-gray-400 border-white/[0.05]'
+                    }`}>
                     {payment.status}
                   </span>
                 </td>
@@ -1026,7 +1037,7 @@ function PaymentsTab({ payments }: { payments: Payment[] }) {
 
 function BotTab({ stats }: { stats: BotStats | null }) {
   if (!stats) return <div className="p-12 text-center text-gray-600 font-medium italic">Establishing bot telemetry...</div>;
-  
+
   const metrics = [
     { label: "Today's Volume", value: stats.applications_today, sub: "Total processed", color: "text-white" },
     { label: "Execution Success", value: `${stats.success_rate}%`, sub: "Accuracy rating", color: "text-emerald-400" },
@@ -1045,15 +1056,15 @@ function BotTab({ stats }: { stats: BotStats | null }) {
           </div>
         ))}
       </div>
-      
+
       <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
         <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-6">Bot System Status</h3>
         <div className="flex items-center justify-between p-4 bg-[#111118] border border-[#262626] rounded-xl">
-           <div className="flex items-center gap-3">
-             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] animate-pulse" />
-             <div className="text-sm font-black uppercase tracking-widest text-white">Agent Online</div>
-           </div>
-           <div className="text-[11px] font-bold text-gray-600 italic">Connected to core cluster</div>
+          <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] animate-pulse" />
+            <div className="text-sm font-black uppercase tracking-widest text-white">Agent Online</div>
+          </div>
+          <div className="text-[11px] font-bold text-gray-600 italic">Connected to core cluster</div>
         </div>
       </div>
     </div>
@@ -1062,7 +1073,7 @@ function BotTab({ stats }: { stats: BotStats | null }) {
 
 function QueueTab({ stats }: { stats: QueueStats | null }) {
   if (!stats) return <div className="p-12 text-center text-gray-600 font-medium italic">Querying queue controller...</div>;
-  
+
   const qMetrics = [
     { label: "Pending Tasks", val: stats.pending, icon: Clock, col: "text-white" },
     { label: "In Progress", val: stats.processing || 0, icon: Play, col: "text-blue-400" },
@@ -1075,11 +1086,11 @@ function QueueTab({ stats }: { stats: QueueStats | null }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
         {qMetrics.map(m => (
           <div key={m.label} className="bg-[#111118] border border-[#262626] rounded-[16px] p-6 group hover:border-white/20 transition-all">
-             <div className="flex items-start justify-between mb-4">
-               <m.icon className="w-5 h-5 text-gray-600 group-hover:text-white transition-colors" />
-             </div>
-             <div className={`text-[28px] font-semibold tracking-tighter leading-none mb-1 ${m.col}`}>{m.val}</div>
-             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">{m.label}</div>
+            <div className="flex items-start justify-between mb-4">
+              <m.icon className="w-5 h-5 text-gray-600 group-hover:text-white transition-colors" />
+            </div>
+            <div className={`text-[28px] font-semibold tracking-tighter leading-none mb-1 ${m.col}`}>{m.val}</div>
+            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">{m.label}</div>
           </div>
         ))}
       </div>
@@ -1090,11 +1101,11 @@ function QueueTab({ stats }: { stats: QueueStats | null }) {
             <Cpu className="w-4 h-4" /> Celery Cluster
           </h3>
           <div className="p-16 bg-[#111118]/70 border border-white/[0.03] rounded-2xl text-center">
-             <div className="w-12 h-12 rounded-full bg-white/[0.02] border border-white/5 flex items-center justify-center mx-auto mb-4">
-               <Cpu className="w-5 h-5 text-zinc-700" />
-             </div>
-             <p className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-600 mb-1">No Active Nodes Located</p>
-             <p className="text-[10px] font-bold text-zinc-800 uppercase tracking-widest italic leading-relaxed">Establishing connection to decentralized worker cluster.</p>
+            <div className="w-12 h-12 rounded-full bg-white/[0.02] border border-white/5 flex items-center justify-center mx-auto mb-4">
+              <Cpu className="w-5 h-5 text-zinc-700" />
+            </div>
+            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-600 mb-1">No Active Nodes Located</p>
+            <p className="text-[10px] font-bold text-zinc-800 uppercase tracking-widest italic leading-relaxed">Establishing connection to decentralized worker cluster.</p>
           </div>
         </div>
 
@@ -1108,8 +1119,8 @@ function QueueTab({ stats }: { stats: QueueStats | null }) {
   );
 }
 
-function ErrorsTab({ failedJobs, setFailedJobs, loading }: { 
-  failedJobs: any[]; 
+function ErrorsTab({ failedJobs, setFailedJobs, loading }: {
+  failedJobs: any[];
   setFailedJobs: React.Dispatch<React.SetStateAction<any[]>>;
   loading: boolean;
 }) {
@@ -1172,10 +1183,10 @@ function ErrorsTab({ failedJobs, setFailedJobs, loading }: {
                 <td className="py-4 px-4 text-[12px] font-bold text-gray-500">{job.retry_count}</td>
                 <td className="py-4 px-4 text-[11px] font-medium text-gray-600">{job.updated_at ? new Date(job.updated_at).toLocaleDateString() : '-'}</td>
                 <td className="py-4 px-4 last:pr-0 text-right">
-                  <button 
-                    onClick={() => handleRetry(job.id)} 
+                  <button
+                    onClick={() => handleRetry(job.id)}
                     disabled={retryingId === job.id}
-                    className="p-2.5 bg-white/[0.03] border border-white/[0.05] rounded-xl hover:bg-white hover:text-black transition-all group/btn" 
+                    className="p-2.5 bg-white/[0.03] border border-white/[0.05] rounded-xl hover:bg-white hover:text-black transition-all group/btn"
                     title="Retry"
                   >
                     <RotateCcw className={`w-3.5 h-4 ${retryingId === job.id ? 'animate-spin' : ''}`} />
@@ -1204,10 +1215,10 @@ function SettingsTab({ health, onAction, loading }: { health: SystemHealth | nul
               <div className="text-[10px] font-bold text-gray-600 italic">Temporarily disable public access</div>
             </div>
             <div className="flex items-center gap-2">
-               <span className="text-[9px] font-black text-gray-700 uppercase tracking-widest">Disabled</span>
-               <div className="w-9 h-4.5 rounded-full bg-zinc-900 border border-white/5 relative flex items-center px-1">
-                 <div className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
-               </div>
+              <span className="text-[9px] font-black text-gray-700 uppercase tracking-widest">Disabled</span>
+              <div className="w-9 h-4.5 rounded-full bg-zinc-900 border border-white/5 relative flex items-center px-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
+              </div>
             </div>
           </div>
 
@@ -1217,10 +1228,10 @@ function SettingsTab({ health, onAction, loading }: { health: SystemHealth | nul
               <div className="text-[10px] font-bold text-gray-600 italic">Enable verbose telemetry stream</div>
             </div>
             <div className="flex items-center gap-2">
-               <span className="text-[9px] font-black text-white uppercase tracking-widest">Enabled</span>
-               <div className="w-9 h-4.5 rounded-full bg-white/10 border border-white/10 relative flex items-center justify-end px-1">
-                 <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_8px_white]" />
-               </div>
+              <span className="text-[9px] font-black text-white uppercase tracking-widest">Enabled</span>
+              <div className="w-9 h-4.5 rounded-full bg-white/10 border border-white/10 relative flex items-center justify-end px-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_8px_white]" />
+              </div>
             </div>
           </div>
         </div>
@@ -1232,39 +1243,39 @@ function SettingsTab({ health, onAction, loading }: { health: SystemHealth | nul
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="p-5 bg-[#111118] border border-[#262626] rounded-2xl space-y-3 group hover:border-white/20 transition-all">
-              <div className="text-[13px] font-black text-white uppercase tracking-widest leading-none">Razorpay Gateway</div>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Connected</span>
-              </div>
-              <div className="text-[10px] font-bold text-gray-700 italic">Live production environment</div>
+            <div className="text-[13px] font-black text-white uppercase tracking-widest leading-none">Razorpay Gateway</div>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Connected</span>
+            </div>
+            <div className="text-[10px] font-bold text-gray-700 italic">Live production environment</div>
           </div>
-          
+
           <div className="p-5 bg-[#111118] border border-[#262626] rounded-2xl space-y-3 group hover:border-white/20 transition-all">
-              <div className="text-[13px] font-black text-white uppercase tracking-widest leading-none">OpenAI API</div>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Connected</span>
-              </div>
-              <div className="text-[10px] font-bold text-gray-700 italic">Gpt-4-turbo orchestration</div>
+            <div className="text-[13px] font-black text-white uppercase tracking-widest leading-none">OpenAI API</div>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Connected</span>
+            </div>
+            <div className="text-[10px] font-bold text-gray-700 italic">Gpt-4-turbo orchestration</div>
           </div>
 
           <div className="p-5 bg-[#111118] border border-[#262626] rounded-2xl space-y-3 group hover:border-white/20 transition-all opacity-40">
-              <div className="text-[13px] font-black text-white/50 uppercase tracking-widest leading-none">Stripe Sync</div>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-gray-800" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">Standby</span>
-              </div>
-              <div className="text-[10px] font-bold text-gray-800 italic">Awaiting credentials</div>
+            <div className="text-[13px] font-black text-white/50 uppercase tracking-widest leading-none">Stripe Sync</div>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-800" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">Standby</span>
+            </div>
+            <div className="text-[10px] font-bold text-gray-800 italic">Awaiting credentials</div>
           </div>
 
           <div className="p-5 bg-[#111118] border border-[#262626] rounded-2xl space-y-3 group hover:border-white/20 transition-all opacity-40">
-              <div className="text-[13px] font-black text-white/50 uppercase tracking-widest leading-none">Redis Cluster</div>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-gray-800" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">Standby</span>
-              </div>
-              <div className="text-[10px] font-bold text-gray-800 italic">Caching layer pending</div>
+            <div className="text-[13px] font-black text-white/50 uppercase tracking-widest leading-none">Redis Cluster</div>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-800" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-gray-600">Standby</span>
+            </div>
+            <div className="text-[10px] font-bold text-gray-800 italic">Caching layer pending</div>
           </div>
         </div>
       </div>
@@ -1275,7 +1286,12 @@ function SettingsTab({ health, onAction, loading }: { health: SystemHealth | nul
 function ApplicationsTab({ applications }: { applications: Application[] }) {
   return (
     <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-      <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-6 px-1">Application Registry</h3>
+      <div className="flex items-center gap-3 mb-6 px-1">
+        <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400">Application Registry</h3>
+        <span className="px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/10 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+          {applications.length} Records
+        </span>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -1292,7 +1308,7 @@ function ApplicationsTab({ applications }: { applications: Application[] }) {
             {applications.map(app => (
               <tr key={app.id} className="hover:bg-white/[0.02] transition-colors group">
                 <td className="py-4 px-4 first:pl-0">
-                   <div className="text-[13px] font-semibold text-white leading-none">{app.user_email}</div>
+                  <div className="text-[13px] font-semibold text-white leading-none">{app.user_email}</div>
                 </td>
                 <td className="py-4 px-4">
                   <div className="text-[12px] font-bold text-gray-300">{app.job_title}</div>
@@ -1301,10 +1317,14 @@ function ApplicationsTab({ applications }: { applications: Application[] }) {
                   <div className="text-[12px] text-gray-500 font-medium italic">{app.company}</div>
                 </td>
                 <td className="py-4 px-4 text-center">
-                  <span className={`px-2.5 py-1 rounded-[4px] text-[10px] font-black uppercase tracking-widest ${
-                    app.status === 'success' ? 'bg-emerald-400 text-black' : 
-                    'bg-zinc-800 text-gray-500'
-                  }`}>
+                  <span className={`px-2.5 py-1 rounded-[4px] text-[10px] font-black uppercase tracking-widest ${[
+                      'success', 'applied', 'viewed', 'shortlisted',
+                      'interview_scheduled', 'interview_completed',
+                      'offer_received', 'offer_accepted'
+                    ].includes(app.status.toLowerCase()) ? 'bg-emerald-400 text-black shadow-[0_0_10px_rgba(52,211,153,0.3)]' :
+                      ['failed', 'rejected'].includes(app.status.toLowerCase()) ? 'bg-red-400/20 text-red-400 border border-red-400/30' :
+                        'bg-zinc-800 text-gray-500'
+                    }`}>
                     {app.status}
                   </span>
                 </td>
@@ -1346,7 +1366,7 @@ function JobsTab({ jobs }: { jobs: Job[] }) {
                 <td className="py-4 px-4 first:pl-0 text-[13px] font-semibold text-white/90">{job.title}</td>
                 <td className="py-4 px-4 text-[12px] font-medium text-gray-400 italic">{job.company}</td>
                 <td className="py-4 px-4">
-                   <span className="text-[10px] font-black uppercase tracking-tighter text-gray-600 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.05]">{job.source}</span>
+                  <span className="text-[10px] font-black uppercase tracking-tighter text-gray-600 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.05]">{job.source}</span>
                 </td>
                 <td className="py-4 px-4">
                   <span className={`px-2 py-1 rounded-[4px] text-[9px] font-black uppercase tracking-widest ${job.status === 'active' ? 'bg-white text-black' : 'bg-zinc-900 text-gray-600'}`}>
@@ -1367,10 +1387,10 @@ function JobsTab({ jobs }: { jobs: Job[] }) {
 
 function AnalyticsTab({ data }: { data: AnalyticsData | null }) {
   if (!data) return <div className="p-12 text-center text-gray-600 font-medium italic">Establishing analytics telemetry...</div>;
-  
+
   const maxApp = Math.max(...data.applications_by_day.map(d => d.count), 1);
   const maxRev = Math.max(...data.revenue_by_day.map(d => d.amount), 1);
-  
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
@@ -1414,9 +1434,9 @@ function FeaturesTab({ flags }: { flags: FeatureFlag[] }) {
     { key: "scraper", label: "Scraper", description: "Enable job scraping", enabled: true },
     { key: "maintenance", label: "Maintenance Mode", description: "Show maintenance page to users", enabled: false },
   ];
-  
+
   const displayFlags = flags.length > 0 ? flags : defaultFlags;
-  
+
   return (
     <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
       <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-8 px-1">Infrastructure Control Flags</h3>
@@ -1431,9 +1451,8 @@ function FeaturesTab({ flags }: { flags: FeatureFlag[] }) {
               <div className={`w-2.5 h-2.5 rounded-full ${flag.enabled ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-gray-800'}`}></div>
             </div>
             <div className="flex items-center gap-3">
-              <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 border rounded-lg transition-all ${
-                flag.enabled ? 'bg-white text-black border-white' : 'bg-transparent text-gray-700 border-white/[0.05]'
-              }`}>
+              <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 border rounded-lg transition-all ${flag.enabled ? 'bg-white text-black border-white' : 'bg-transparent text-gray-700 border-white/[0.05]'
+                }`}>
                 {flag.enabled ? 'Operational' : 'Disabled'}
               </span>
             </div>
@@ -1482,10 +1501,9 @@ function AuditTab({ logs }: { logs: AuditLog[] }) {
                 <td className="py-4 px-4 text-[12px] text-gray-500 font-medium">{log.target}</td>
                 <td className="py-4 px-4 text-[10px] font-bold text-gray-700 font-mono tracking-tight">{log.ip_address}</td>
                 <td className="py-4 px-4 text-center">
-                  <span className={`px-2 py-0.5 rounded-[4px] text-[9px] font-black uppercase tracking-widest border transition-all ${
-                    log.result === 'success' ? 'bg-emerald-400/10 text-emerald-400 border-emerald-400/20' : 
-                    'bg-red-400/10 text-red-400 border-red-400/20'
-                  }`}>
+                  <span className={`px-2 py-0.5 rounded-[4px] text-[9px] font-black uppercase tracking-widest border transition-all ${log.result === 'success' ? 'bg-emerald-400/10 text-emerald-400 border-emerald-400/20' :
+                      'bg-red-400/10 text-red-400 border-red-400/20'
+                    }`}>
                     {log.result}
                   </span>
                 </td>
@@ -1503,7 +1521,7 @@ function AuditTab({ logs }: { logs: AuditLog[] }) {
 
 function MessagesTab({ messages }: { messages: any[] }) {
   const importantMessages = messages.filter(m => m.is_important);
-  
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1525,7 +1543,7 @@ function MessagesTab({ messages }: { messages: any[] }) {
           <div className="text-[10px] font-bold text-gray-600 italic mt-1">Active platform nodes</div>
         </div>
       </div>
-      
+
       <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[16px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
         <h3 className="text-sm font-medium uppercase tracking-wide text-gray-400 mb-6 px-1">Communication Telemetry</h3>
         <div className="overflow-x-auto">
@@ -1582,7 +1600,7 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
   const [showLimits, setShowLimits] = useState(true);
   const [timeRange, setTimeRange] = useState("Last 7 days");
   const [modelFilter, setModelFilter] = useState("Show all Models");
-  
+
   const usageTimeline = (llmUsage?.timeline || []).map((point) => ({
     ...point,
     label: new Date(point.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
@@ -1610,12 +1628,12 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 px-1">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
-             <h1 className="text-3xl font-semibold text-white tracking-tight">Metrics</h1>
+            <h1 className="text-3xl font-semibold text-white tracking-tight">Metrics</h1>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Show Limits</span>
-            <button 
+            <button
               onClick={() => setShowLimits(!showLimits)}
               className={cn(
                 "w-10 h-5 rounded-full transition-all relative flex items-center px-1 border border-white/10",
@@ -1635,7 +1653,7 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
             <RotateCcw className="w-3 h-3 text-gray-500" />
             <span className="text-xs font-semibold text-white">Refresh</span>
           </button>
-          
+
           <DropdownItem label="Time Range" value={timeRange} />
           <DropdownItem label="Model" value={modelFilter} />
           <DropdownItem label="API Keys" value="Show all API Keys" />
@@ -1653,25 +1671,25 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-1 mt-12">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-             <h2 className="text-2xl font-bold text-white tracking-tight">AI Fleet Intelligence</h2>
-             <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-bold text-gray-400">Live Telemetry</span>
+            <h2 className="text-2xl font-bold text-white tracking-tight">AI Fleet Intelligence</h2>
+            <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-bold text-gray-400">Live Telemetry</span>
           </div>
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 min-w-[160px]">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Environment</span>
-                <span className="text-xs font-semibold text-white">Production Cluster</span>
-             </div>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 min-w-[160px]">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Environment</span>
+              <span className="text-xs font-semibold text-white">Production Cluster</span>
+            </div>
           </div>
         </div>
 
         <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[24px] p-6 min-w-[300px]">
-           <div className="flex items-start justify-between mb-2">
-              <span className="text-sm text-gray-400 font-medium">Monthly Burn</span>
-              <span className="text-xl font-bold text-white tabular-nums">${llmUsage?.total_estimated_cost?.toFixed(2) || "0.00"}</span>
-           </div>
-           <p className="text-[10px] text-gray-500 leading-relaxed max-w-[240px]">
-              Estimated infrastructure spend based on current token volume and provider rates.
-           </p>
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-sm text-gray-400 font-medium">Monthly Burn</span>
+            <span className="text-xl font-bold text-white tabular-nums">${llmUsage?.total_estimated_cost?.toFixed(2) || "0.00"}</span>
+          </div>
+          <p className="text-[10px] text-gray-500 leading-relaxed max-w-[240px]">
+            Estimated infrastructure spend based on current token volume and provider rates.
+          </p>
         </div>
       </div>
 
@@ -1689,7 +1707,7 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
                       <span className="text-[11px] font-bold text-white tracking-tighter">{(f.tokens / 1000).toFixed(1)}k TOKENS</span>
                     </div>
                     <div className="h-1.5 bg-white/[0.02] border border-white/[0.05] rounded-full overflow-hidden">
-                      <motion.div 
+                      <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${(f.tokens / maxTokens) * 100}%` }}
                         transition={{ duration: 1, delay: i * 0.1 }}
@@ -1700,15 +1718,15 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
                 )
               })}
               {(llmUsage?.features || []).length === 0 && (
-                 <div className="h-full flex flex-col items-center justify-center py-20 space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-zinc-600" />
-                    </div>
-                    <div className="text-center space-y-2">
-                      <p className="text-sm font-bold text-white/60">No Feature Usage Yet</p>
-                      <p className="text-[10px] text-zinc-600 max-w-xs">Usage data will appear when users leverage AI features: resume analysis, job matching, auto-apply, or chat assistance.</p>
-                    </div>
-                 </div>
+                <div className="h-full flex flex-col items-center justify-center py-20 space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                    <Zap className="w-5 h-5 text-zinc-600" />
+                  </div>
+                  <div className="text-center space-y-2">
+                    <p className="text-sm font-bold text-white/60">No Feature Usage Yet</p>
+                    <p className="text-[10px] text-zinc-600 max-w-xs">Usage data will appear when users leverage AI features: resume analysis, job matching, auto-apply, or chat assistance.</p>
+                  </div>
+                </div>
               )}
             </div>
           </ChartContainer>
@@ -1717,7 +1735,7 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
         <div className="space-y-6">
           <div className="bg-[#1c1c1e] border border-white/[0.08] rounded-[24px] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] min-h-full">
             <h4 className="text-sm font-medium text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-               <Users className="w-4 h-4" /> Industrial Consumers
+              <Users className="w-4 h-4" /> Industrial Consumers
             </h4>
             <p className="text-[10px] text-zinc-600 mb-6">Top users by token consumption</p>
             <div className="space-y-6">
@@ -1746,9 +1764,9 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
             </div>
 
             <div className="mt-12 pt-6 border-t border-white/[0.04]">
-               <button className="w-full py-3 text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500 hover:text-white border border-white/[0.05] hover:border-white/10 rounded-xl transition-all">
-                  Full User Ledger
-               </button>
+              <button className="w-full py-3 text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500 hover:text-white border border-white/[0.05] hover:border-white/10 rounded-xl transition-all">
+                Full User Ledger
+              </button>
             </div>
           </div>
         </div>
@@ -1794,11 +1812,11 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-zinc-700 py-20 space-y-4">
-                 <CheckCircle2 className="w-12 h-12 mb-2 opacity-30" />
-                 <div className="text-center space-y-2">
-                   <p className="text-sm font-bold text-white/60">Zero Errors Detected</p>
-                   <p className="text-[10px] text-zinc-600 max-w-xs">All AI API requests completed successfully. Error logs will appear when rate limits or API failures occur.</p>
-                 </div>
+                <CheckCircle2 className="w-12 h-12 mb-2 opacity-30" />
+                <div className="text-center space-y-2">
+                  <p className="text-sm font-bold text-white/60">Zero Errors Detected</p>
+                  <p className="text-[10px] text-zinc-600 max-w-xs">All AI API requests completed successfully. Error logs will appear when rate limits or API failures occur.</p>
+                </div>
               </div>
             )}
           </ChartContainer>
@@ -1808,8 +1826,8 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
       {/* 5. DETAILED MODEL METRICS */}
       <div className="space-y-12">
         <h3 className="text-xl font-semibold text-white px-1 pt-4 flex items-center gap-2 uppercase tracking-widest">
-           Inference Nodes
-           <span className="text-xs font-normal text-zinc-600 tracking-normal">— per-model performance and request timeline</span>
+          Inference Nodes
+          <span className="text-xs font-normal text-zinc-600 tracking-normal">— per-model performance and request timeline</span>
         </h3>
         {(llmUsage?.models || []).map((model) => (
           <div key={`${model.provider}-${model.model}`} className="space-y-6 pt-8 border-t border-white/[0.04]">
@@ -1824,14 +1842,14 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
                   <AreaChart data={model.timeline.map(p => ({ ...p, label: new Date(p.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' }) }))}>
                     <defs>
                       <linearGradient id={`grad-req-${model.model}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#ffffff" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1} />
+                        <stop offset="95%" stopColor="#ffffff" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                     <XAxis dataKey="label" stroke="#3f3f46" fontSize={9} fontWeight="bold" tickLine={false} axisLine={false} />
                     <YAxis stroke="#3f3f46" fontSize={9} fontWeight="bold" tickLine={false} axisLine={false} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={tooltipStyle}
                       content={({ active, payload }) => {
                         if (active && payload && payload.length) {
@@ -1879,13 +1897,13 @@ function AIMetricsTab({ llmUsage }: { llmUsage: LLMUsageData | null }) {
                   <AreaChart data={model.timeline.map(p => ({ ...p, label: new Date(p.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' }) }))}>
                     <defs>
                       <linearGradient id={`grad-tok-${model.model}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#ffffff" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1} />
+                        <stop offset="95%" stopColor="#ffffff" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                     <XAxis dataKey="label" stroke="#3f3f46" fontSize={9} fontWeight="bold" tickLine={false} axisLine={false} />
-                    <YAxis stroke="#3f3f46" fontSize={9} fontWeight="bold" tickLine={false} axisLine={false} tickFormatter={(v) => v >= 1000 ? `${v/1000}K` : v} />
+                    <YAxis stroke="#3f3f46" fontSize={9} fontWeight="bold" tickLine={false} axisLine={false} tickFormatter={(v) => v >= 1000 ? `${v / 1000}K` : v} />
                     <Tooltip contentStyle={tooltipStyle} />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: 10, fontWeight: 'bold', paddingTop: 20 }} />
                     <Area type="monotone" dataKey="prompt_tokens" name="Input" stroke="#ffffff" strokeOpacity={0.1} fill="#ffffff" fillOpacity={0.03} strokeWidth={1} stackId="1" dot={false} />

@@ -19,6 +19,13 @@ from app.services.cookie_service import cookie_service
 logger = structlog.get_logger()
 
 
+def _browser_headless() -> bool:
+    headless_env = os.environ.get("INTERNSHALA_HEADLESS") or os.environ.get("BROWSER_HEADLESS")
+    if headless_env is not None:
+        return headless_env.strip().lower() in ("1", "true", "yes", "on")
+    return not bool(os.environ.get("DISPLAY"))
+
+
 class InternshalaLoginService:
     """Service to log into Internshala and capture session cookies."""
 
@@ -72,16 +79,17 @@ class InternshalaLoginService:
             proxy_server = os.environ.get("INTERNSHALA_PROXY_SERVER")
             proxy_user = os.environ.get("INTERNSHALA_PROXY_USERNAME")
             proxy_pass = os.environ.get("INTERNSHALA_PROXY_PASSWORD")
-            headless_env = os.environ.get("INTERNSHALA_HEADLESS")
-            headless = False if headless_env and headless_env.lower() in ("false", "0", "no") else True
+            headless = _browser_headless()
 
             launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--disable-setuid-sandbox",
                 "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--start-maximized",
                 "--disable-web-security",
                 "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-gpu",
             ]
 
             proxy = None
@@ -100,6 +108,7 @@ class InternshalaLoginService:
                 locale="en-US",
                 timezone_id="Asia/Kolkata",
                 permissions=["geolocation"],
+                geolocation={"latitude": 12.9716, "longitude": 77.5946},
                 accept_downloads=True,
             )
 
@@ -138,6 +147,8 @@ class InternshalaLoginService:
                 )
                 # Create context with more realistic settings
                 context = await browser.new_context(**context_kwargs)
+                
+            context.set_default_timeout(60000)
 
             # Add extra headers to look more like real browser
             await context.set_extra_http_headers({

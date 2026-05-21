@@ -63,47 +63,64 @@ class AIRouter:
         
         last_error = None
         
-        # Try primary provider (Groq)
-        if self.primary == "groq":
-            try:
-                result = await self._groq_completion(messages, model, max_tokens, temperature, **kwargs)
-                latency = int((time.time() - start_time) * 1000)
-                await self._record_usage(
-                    provider="groq",
-                    model=result["model"],
-                    usage=result["usage"],
-                    latency=latency,
-                    status_code=200,
-                    user_id=user_id,
-                    endpoint=endpoint
-                )
-                return result
-            except Exception as e:
-                error_msg = str(e)
-                status_code = 429 if ("429" in error_msg or "rate_limit" in error_msg.lower()) else 500
-                latency = int((time.time() - start_time) * 1000)
-                # Log the failure before fallback
-                await self._record_usage(
-                    provider="groq",
-                    model=model,
-                    usage={"total_tokens": 0},
-                    latency=latency,
-                    status_code=status_code,
-                    success=False,
-                    user_id=user_id,
-                    endpoint=endpoint
-                )
-                
-                if status_code == 429:
-                    logger.warning("Groq rate limited, trying fallback", error=error_msg[:100])
-                else:
-                    logger.error("Groq failed, trying fallback", error=error_msg[:100])
-                last_error = e
+        # Try primary provider (Groq) with a quick retry on 429
+        for attempt in range(2):
+            if self.primary == "groq":
+                try:
+                    result = await self._groq_completion(messages, model, max_tokens, temperature, **kwargs)
+                    # Strip bold stars as requested by user for clean UI
+                    if "content" in result and result["content"]:
+                        result["content"] = result["content"].replace("**", "")
+                    
+                    latency = int((time.time() - start_time) * 1000)
+                    await self._record_usage(
+                        provider="groq",
+                        model=result["model"],
+                        usage=result["usage"],
+                        latency=latency,
+                        status_code=200,
+                        user_id=user_id,
+                        endpoint=endpoint
+                    )
+                    return result
+                except Exception as e:
+                    error_msg = str(e)
+                    status_code = 429 if ("429" in error_msg or "rate_limit" in error_msg.lower() or "quota" in error_msg.lower()) else 500
+                    
+                    if status_code == 429 and attempt == 0:
+                        logger.warning("Groq rate limited, waiting 2s before retry or fallback")
+                        await asyncio.sleep(2)
+                        continue
+                        
+                    latency = int((time.time() - start_time) * 1000)
+                    # Log the failure before fallback
+                    await self._record_usage(
+                        provider="groq",
+                        model=model,
+                        usage={"total_tokens": 0},
+                        latency=latency,
+                        status_code=status_code,
+                        success=False,
+                        user_id=user_id,
+                        endpoint=endpoint
+                    )
+                    
+                    if status_code == 429:
+                        logger.warning("Groq rate limited, trying fallback", error=error_msg[:100])
+                    else:
+                        logger.error("Groq failed, trying fallback", error=error_msg[:100])
+                    last_error = e
+                    break # Go to fallback
         
         # Try fallback (Gemini)
         if self.use_gemini:
             try:
                 result = await self._gemini_completion(messages, model, max_tokens, temperature)
+                
+                # Strip bold stars as requested by user for clean UI
+                if "content" in result and result["content"]:
+                    result["content"] = result["content"].replace("**", "")
+                    
                 latency = int((time.time() - start_time) * 1000)
                 await self._record_usage(
                     provider="gemini",
@@ -235,31 +252,45 @@ class AIRouter:
         selected_model = None
         last_error = None
 
-        for candidate in gemini_candidates:
-            try:
-                gemini_model = gemini_client.GenerativeModel(candidate)
-                loop = asyncio.get_running_loop()
-                response = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        lambda: gemini_model.generate_content(
-                            gemini_messages,
-                            generation_config={
-                                "max_output_tokens": max_tokens,
-                                "temperature": temperature,
-                            }
-                        )
-                    ),
-                    timeout=10.0
-                )
-                selected_model = candidate
+        for attempt in range(2):
+            for candidate in gemini_candidates:
+                try:
+                    gemini_model = gemini_client.GenerativeModel(candidate)
+                    loop = asyncio.get_running_loop()
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: gemini_model.generate_content(
+                                gemini_messages,
+                                generation_config={
+                                    "max_output_tokens": max_tokens,
+                                    "temperature": temperature,
+                                }
+                            )
+                        ),
+                        timeout=10.0
+                    )
+                    selected_model = candidate
+                    break
+                except asyncio.TimeoutError:
+                    logger.error("Gemini fallback timed out after 10s", model=candidate)
+                    last_error = Exception(f"Gemini timeout for model {candidate}")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "429" in error_msg or "quota" in error_msg.lower():
+                        logger.warning("Gemini model quota reached", model=candidate)
+                    else:
+                        logger.warning("Gemini model unavailable, trying next", model=candidate, error=error_msg[:120])
+                    last_error = e
+            
+            if response is not None:
                 break
-            except asyncio.TimeoutError:
-                logger.error("Gemini fallback timed out after 10s", model=candidate)
-                last_error = Exception(f"Gemini timeout for model {candidate}")
-            except Exception as e:
-                logger.warning("Gemini model unavailable, trying next", model=candidate, error=str(e)[:120])
-                last_error = e
+            
+            if attempt == 0 and ("429" in str(last_error) or "quota" in str(last_error).lower()):
+                logger.warning("All Gemini models throttled, waiting 3s before final retry")
+                await asyncio.sleep(3)
+            else:
+                break
 
         if response is None:
             raise Exception(f"Gemini fallback failed for all models: {str(last_error)[:180]}")

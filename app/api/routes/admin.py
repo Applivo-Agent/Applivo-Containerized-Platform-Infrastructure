@@ -617,22 +617,14 @@ async def list_users(
     )
     chat_map = {r[0]: r[1] for r in chat_query.all()}
 
-    # 2. Cover Letter Tokens
-    cl_query = await db.execute(
-        select(CoverLetter.user_id, func.sum(CoverLetter.tokens_used))
-        .where(CoverLetter.user_id.in_(user_ids))
-        .group_by(CoverLetter.user_id)
+    # 2. Total AI Token Usage (All time)
+    from app.models.ai_usage import AIUsageLog
+    token_query = await db.execute(
+        select(AIUsageLog.user_id, func.sum(AIUsageLog.total_tokens))
+        .where(AIUsageLog.user_id.in_(user_ids))
+        .group_by(AIUsageLog.user_id)
     )
-    cl_map = {r[0]: r[1] or 0 for r in cl_query.all()}
-
-    # 3. Job Analysis Tokens
-    job_query = await db.execute(
-        select(Job.user_id, func.sum(JobAnalysis.tokens_used))
-        .join(JobAnalysis, Job.id == JobAnalysis.job_id)
-        .where(Job.user_id.in_(user_ids))
-        .group_by(Job.user_id)
-    )
-    job_map = {r[0]: r[1] or 0 for r in job_query.all()}
+    token_map = {r[0]: r[1] or 0 for r in token_query.all()}
 
     from app.models.application import Application
     
@@ -674,7 +666,7 @@ async def list_users(
         # Avoid misleading default limits when user has no active subscription.
         limit = int(active_sub.ai_credits if active_sub else 0)
         used = int(chat_map.get(user.id, 0) or 0)
-        tokens = int((cl_map.get(user.id, 0) or 0) + (job_map.get(user.id, 0) or 0))
+        tokens = int(token_map.get(user.id, 0) or 0)
         app_count = app_count_map.get(user.id, 0)
         profile_complete = user.profile is not None and bool(user.profile.desired_roles)
 
@@ -1550,13 +1542,15 @@ async def get_analytics(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Get analytics data for charts."""
+    """Get real SaaS analytics data for charts and intelligence."""
     from datetime import timedelta
     from sqlalchemy import func
     
-    today = datetime.now(timezone.utc).date()
+    now = datetime.now(timezone.utc)
+    today = now.date()
     seven_days_ago = today - timedelta(days=6)
     
+    # 1. Applications by Day (Last 7 days, padded)
     app_query = (
         select(
             func.date(Application.created_at).label("date"),
@@ -1564,26 +1558,29 @@ async def get_analytics(
         )
         .where(func.date(Application.created_at) >= seven_days_ago)
         .group_by(func.date(Application.created_at))
-        .order_by(func.date(Application.created_at))
     )
     app_result = await db.execute(app_query)
-    applications_by_day = [{"date": str(r.date), "count": r.count} for r in app_result.all()]
+    app_data = {str(r.date): r.count for r in app_result.all()}
     
+    # 2. Revenue by Day (Last 7 days, padded)
     pay_query = (
         select(
             func.date(Payment.created_at).label("date"),
             func.sum(Payment.amount).label("amount")
         )
         .where(
-            func.lower(Payment.status.cast(String)) == PaymentStatus.CAPTURED.value.lower()
+            func.lower(Payment.status.cast(String)).in_([
+                PaymentStatus.CAPTURED.value.lower(),
+                PaymentStatus.SUCCESS.value.lower()
+            ])
         )
         .where(func.date(Payment.created_at) >= seven_days_ago)
         .group_by(func.date(Payment.created_at))
-        .order_by(func.date(Payment.created_at))
     )
     pay_result = await db.execute(pay_query)
-    revenue_by_day = [{"date": str(r.date), "amount": float(r.amount or 0)} for r in pay_result.all()]
+    pay_data = {str(r.date): float(r.amount or 0) / 100 for r in pay_result.all()}
     
+    # 3. Users by Day (Last 7 days, padded)
     user_query = (
         select(
             func.date(User.created_at).label("date"),
@@ -1591,15 +1588,70 @@ async def get_analytics(
         )
         .where(func.date(User.created_at) >= seven_days_ago)
         .group_by(func.date(User.created_at))
-        .order_by(func.date(User.created_at))
     )
     user_result = await db.execute(user_query)
-    users_by_day = [{"date": str(r.date), "count": r.count} for r in user_result.all()]
+    user_data_map = {str(r.date): r.count for r in user_result.all()}
+    
+    # Pad all days
+    applications_by_day = []
+    revenue_by_day = []
+    users_by_day = []
+    
+    for i in range(7):
+        day = (seven_days_ago + timedelta(days=i)).isoformat()
+        applications_by_day.append({"date": day, "count": app_data.get(day, 0)})
+        revenue_by_day.append({"date": day, "amount": pay_data.get(day, 0)})
+        users_by_day.append({"date": day, "count": user_data_map.get(day, 0)})
+        
+    # 4. Advanced SaaS Metrics
+    # MRR = Sum of prices of active subscriptions
+    from app.models.subscription import PLAN_PRICES, SubscriptionStatus
+    active_subs_query = (
+        select(Subscription.plan)
+        .where(func.lower(Subscription.status.cast(String)) == SubscriptionStatus.ACTIVE.value.lower())
+    )
+    active_subs_result = await db.execute(active_subs_query)
+    plans = active_subs_result.scalars().all()
+    
+    mrr_paise = sum(PLAN_PRICES.get(p, 0) for p in plans)
+    mrr = float(mrr_paise) / 100
+    arr = mrr * 12
+    
+    # Conversion Rate
+    total_users_count = (await db.execute(select(func.count(User.id)))).scalar() or 1
+    paying_users_count = (await db.execute(
+        select(func.count(func.distinct(Payment.user_id)))
+        .where(func.lower(Payment.status.cast(String)) == PaymentStatus.CAPTURED.value.lower())
+    )).scalar() or 0
+    conversion_rate = round((paying_users_count / total_users_count) * 100, 2)
+    
+    # Churn Rate (last 30 days)
+    thirty_days_ago = now - timedelta(days=30)
+    cancelled_subs = (await db.execute(
+        select(func.count(Subscription.id)).where(
+            func.lower(Subscription.status.cast(String)) == SubscriptionStatus.CANCELLED.value.lower(),
+            Subscription.updated_at >= thirty_days_ago
+        )
+    )).scalar() or 0
+    active_subs_count = len(plans) or 1
+    churn_rate = round((cancelled_subs / (active_subs_count + cancelled_subs)) * 100, 2)
     
     return {
         "applications_by_day": applications_by_day,
         "revenue_by_day": revenue_by_day,
         "users_by_day": users_by_day,
+        "mrr": mrr,
+        "arr": arr,
+        "conversion_rate": conversion_rate,
+        "churn_rate": churn_rate,
+        "total_revenue": float((await db.execute(
+            select(func.sum(Payment.amount))
+            .where(func.lower(Payment.status.cast(String)).in_([
+                PaymentStatus.CAPTURED.value.lower(),
+                PaymentStatus.SUCCESS.value.lower()
+            ]))
+        )).scalar() or 0) / 100,
+        "paying_users": paying_users_count
     }
 
 

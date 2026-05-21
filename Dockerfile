@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libgbm1 \
     libpango-1.0-0 \
+    libpangocairo-1.0-0 \
     libcairo2 \
     libasound2 \
     libatspi2.0-0 \
@@ -57,11 +58,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Install Playwright browser (required for apply bot)
-# FIX: Use a global path so non-root 'applivo' user can access browsers installed as root
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/playwright
-RUN pip install --no-cache-dir playwright==1.42.0 && \
-    playwright install chromium
+# Install Playwright browser (required for apply bot).
+# Keep browsers in a dedicated path and hand ownership to runtime user.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p ${PLAYWRIGHT_BROWSERS_PATH} && \
+    pip install --no-cache-dir playwright==1.42.0 && \
+    python -m playwright install chromium
 
 # Copy application code
 COPY . .
@@ -73,7 +75,7 @@ RUN mkdir -p storage logs
 
 # Create non-root user
 RUN useradd -m -u 1000 applivo && \
-    chown -R applivo:applivo /app
+    chown -R applivo:applivo /app ${PLAYWRIGHT_BROWSERS_PATH}
 
 USER applivo
 

@@ -11,16 +11,14 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 
 import structlog
-from openai import AsyncOpenAI
 from sqlalchemy import select, and_
 
 from app.core.config import settings
 from app.core.database import get_db_context
 from app.models.application import Application, ApplicationStatus, FollowUpStatus
-from app.models.user import UserProfile
+from app.services.ai_router import ai_router
 
 logger = structlog.get_logger()
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 FOLLOW_UP_PROMPT = """
 Write a brief, professional follow-up email for a job application.
@@ -116,7 +114,7 @@ class FollowUpService:
     async def _send_follow_up_email(self, app: Application, db) -> None:
         """Generate and send a follow-up email."""
         try:
-            response = await client.chat.completions.create(
+            response = await ai_router.chat_completions_create(
                 model=settings.OPENAI_MODEL_LIGHT,
                 max_tokens=200,
                 temperature=0.4,
@@ -124,8 +122,10 @@ class FollowUpService:
                     {"role": "system", "content": FOLLOW_UP_PROMPT},
                     {"role": "user", "content": f"Role: {app.job_title_snapshot}\nCompany: {app.company_snapshot}\nApplied: {app.applied_at.strftime('%B %d') if app.applied_at else 'recently'}"},
                 ],
+                user_id=app.user_id,
+                endpoint="/api/follow-ups/generate",
             )
-            email_body = response.choices[0].message.content
+            email_body = response["content"]
         except Exception:
             email_body = (
                 f"Dear Hiring Team,\n\nI wanted to follow up on my application for the "
@@ -159,7 +159,7 @@ class FollowUpService:
     async def _send_thank_you_email(self, app: Application, db) -> None:
         """Generate and send a post-interview thank-you email."""
         try:
-            response = await client.chat.completions.create(
+            response = await ai_router.chat_completions_create(
                 model=settings.OPENAI_MODEL_LIGHT,
                 max_tokens=200,
                 temperature=0.5,
@@ -167,8 +167,10 @@ class FollowUpService:
                     {"role": "system", "content": THANK_YOU_PROMPT},
                     {"role": "user", "content": f"Role: {app.job_title_snapshot}\nCompany: {app.company_snapshot}\nInterview type: {app.interview_type or 'technical'}"},
                 ],
+                user_id=app.user_id,
+                endpoint="/api/follow-ups/thank-you",
             )
-            email_body = response.choices[0].message.content
+            email_body = response["content"]
         except Exception:
             email_body = (
                 f"Dear {app.recruiter_name or 'Hiring Team'},\n\n"

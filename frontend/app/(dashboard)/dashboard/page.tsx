@@ -267,6 +267,39 @@ export default function DashboardPage() {
 
   // Agent action UI helpers (now powered by global context)
 
+  // Separate handler functions for each task type
+  const handleScrapeJobs = async () => {
+    try {
+      await runTask("scrape_jobs");
+    } catch (err) {
+      toast.error("Failed to start scraping task");
+    }
+  };
+
+  const handleAnalyzeJobs = async () => {
+    try {
+      await runTask("analyze_jobs");
+    } catch (err) {
+      toast.error("Failed to start analyzing task");
+    }
+  };
+
+  const handleQueueJobs = async () => {
+    try {
+      await runTask("queue_jobs");
+    } catch (err) {
+      toast.error("Failed to start queueing task");
+    }
+  };
+
+  const handleApplyQueued = async () => {
+    try {
+      await runTask("apply_queued");
+    } catch (err) {
+      toast.error("Failed to start deployment task");
+    }
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto space-y-8 p-1 md:p-4 min-h-[90vh]">
 
@@ -275,7 +308,7 @@ export default function DashboardPage() {
         <h2 className="text-xl font-bold tracking-tight text-white/90 hidden md:block">System Overview</h2>
         <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
           <button
-            onClick={() => runTask("scrape_jobs")}
+            onClick={handleScrapeJobs}
             disabled={isWorking}
             className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
           >
@@ -286,7 +319,7 @@ export default function DashboardPage() {
             )}
           </button>
           <button
-            onClick={() => runTask("analyze_jobs")}
+            onClick={handleAnalyzeJobs}
             disabled={isWorking}
             className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
           >
@@ -297,7 +330,7 @@ export default function DashboardPage() {
             )}
           </button>
           <button
-            onClick={() => runTask("queue_jobs")}
+            onClick={handleQueueJobs}
             disabled={isWorking}
             className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
           >
@@ -308,7 +341,7 @@ export default function DashboardPage() {
             )}
           </button>
           <button
-            onClick={() => runTask("apply_queued")}
+            onClick={handleApplyQueued}
             disabled={isWorking}
             className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e] hover:bg-[#2a2a2a] text-sm font-medium text-white transition-all rounded-lg border border-[#2a2a2a]"
           >

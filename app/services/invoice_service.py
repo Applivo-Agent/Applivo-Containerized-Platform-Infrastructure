@@ -183,6 +183,9 @@ class InvoiceService:
         if not date:
             date = datetime.now().strftime("%B %d, %Y")
 
+        # Razorpay stores amounts in paise (1 INR = 100 paise). Convert to rupees for display.
+        amount_rupees = amount / 100
+
         invoices_dir = os.path.join(os.getcwd(), "storage", "invoices")
         os.makedirs(invoices_dir, exist_ok=True)
         output_path = os.path.join(invoices_dir, f"invoice_{payment_id}.pdf")
@@ -317,7 +320,7 @@ class InvoiceService:
                         self.detail_value_style,
                     ),
                     Paragraph("1", self.detail_value_style),
-                    Paragraph(f"Rs {amount:,.2f}", self.detail_value_style),
+                    Paragraph(f"Rs {amount_rupees:,.2f}", self.detail_value_style),
                 ],
             ], colWidths=[4.15 * inch, 0.75 * inch, 2.1 * inch])
             items.setStyle(TableStyle([
@@ -333,11 +336,11 @@ class InvoiceService:
             elements.append(Spacer(1, 0.12 * inch))
 
             totals = Table([
-                [Paragraph("Subtotal", self.total_label_style), Paragraph(f"Rs {amount:,.2f}", self.total_value_style)],
+                [Paragraph("Subtotal", self.total_label_style), Paragraph(f"Rs {amount_rupees:,.2f}", self.total_value_style)],
                 [Paragraph("GST (0%)", self.total_label_style), Paragraph("Rs 0.00", self.total_value_style)],
                 [
                     Paragraph("Total Amount Paid", self.total_label_style),
-                    Paragraph(f"<font color='#1f3fbf'><b>Rs {amount:,.2f}</b></font>", self.total_value_style),
+                    Paragraph(f"<font color='#1f3fbf'><b>Rs {amount_rupees:,.2f}</b></font>", self.total_value_style),
                 ],
             ], colWidths=[1.9 * inch, 1.4 * inch])
             totals.setStyle(TableStyle([

@@ -1,7 +1,6 @@
 "use client";
 
-import React, { createContext, useContext } from "react";
-import { useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentApi } from "./api";
 import { toast } from "sonner";
@@ -39,27 +38,32 @@ export function AgentStatusProvider({ children }: { children: React.ReactNode })
   const { data: status, isLoading } = useQuery({
     queryKey: ["agent-status"],
     queryFn: () => agentApi.status().then((r) => r.data),
-    staleTime: 5000,
+    staleTime: 2000,
     enabled: !!user,
     refetchInterval: (query) => {
       if (!user) return false;
-      // Poll every 5s while the backend reports an active task.
+      // Poll every 1s while the backend reports an active task for real-time updates
+      // Otherwise poll every 10s for background updates
       const data = query.state.data as AgentStatus | undefined;
-      return data?.is_running ? 5000 : 30000;
-    },
-    onSuccess: (data) => {
-      // If backend is still running, sync optimistic state with server current_task
-      if (data.is_running && data.current_task) {
-        setOptimisticTask(data.current_task);
-        return;
-      }
-
-      // If backend is not running, always clear optimistic task
-      if (!data.is_running) {
-        setOptimisticTask(null);
-      }
+      return data?.is_running ? 1000 : 10000;
     },
   });
+  // In React Query v5, onSuccess is removed from useQuery.
+  // We must use useEffect to synchronize state when data changes.
+  useEffect(() => {
+    if (!status) return;
+
+    // If backend is still running, sync optimistic state with server current_task
+    if (status.is_running && status.current_task) {
+      setOptimisticTask(status.current_task);
+      return;
+    }
+
+    // If backend is not running, always clear optimistic task
+    if (!status.is_running) {
+      setOptimisticTask(null);
+    }
+  }, [status?.is_running, status?.current_task, status]);
 
   const runMutation = useMutation({
     mutationFn: (variables: { taskType: string; payload?: Record<string, unknown> }) => 
