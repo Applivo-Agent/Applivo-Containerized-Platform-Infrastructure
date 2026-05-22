@@ -26,13 +26,13 @@ def upgrade() -> None:
 
     op.execute("""
     UPDATE jobs
-    SET experience_level = UPPER(experience_level::text)::experience_level
+    SET experience_level = UPPER(experience_level::text)::experiencelevel
     WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)
     """)
 
     op.execute("""
     UPDATE user_profiles
-    SET experience_level = UPPER(experience_level::text)::experience_level
+    SET experience_level = UPPER(experience_level::text)::experiencelevel
     WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)
     """)
 
@@ -48,12 +48,12 @@ def downgrade() -> None:
 
     op.execute("""
     UPDATE jobs
-    SET experience_level = LOWER(experience_level::text)::experience_level
+    SET experience_level = LOWER(experience_level::text)::experiencelevel
     WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)
     """)
 
     op.execute("""
     UPDATE user_profiles
-    SET experience_level = LOWER(experience_level::text)::experience_level
+    SET experience_level = LOWER(experience_level::text)::experiencelevel
     WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)
     """)
