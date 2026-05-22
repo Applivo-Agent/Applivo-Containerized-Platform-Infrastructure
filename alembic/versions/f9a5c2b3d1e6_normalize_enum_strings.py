@@ -20,19 +20,19 @@ def upgrade() -> None:
     # Idempotent: only updates values where lower != upper.
     op.execute("""
     UPDATE jobs
-    SET source = UPPER(source::text)
+    SET source = UPPER(source::text)::jobsource
     WHERE source IS NOT NULL AND source::text <> UPPER(source::text)
     """)
 
     op.execute("""
     UPDATE jobs
-    SET experience_level = UPPER(experience_level::text)
+    SET experience_level = UPPER(experience_level::text)::experience_level
     WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)
     """)
 
     op.execute("""
     UPDATE user_profiles
-    SET experience_level = UPPER(experience_level::text)
+    SET experience_level = UPPER(experience_level::text)::experience_level
     WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)
     """)
 
@@ -42,18 +42,18 @@ def downgrade() -> None:
     # This is reversible but best-effort; production systems may prefer keeping uppercase.
     op.execute("""
     UPDATE jobs
-    SET source = LOWER(source::text)
+    SET source = LOWER(source::text)::jobsource
     WHERE source IS NOT NULL AND source::text <> LOWER(source::text)
     """)
 
     op.execute("""
     UPDATE jobs
-    SET experience_level = LOWER(experience_level::text)
+    SET experience_level = LOWER(experience_level::text)::experience_level
     WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)
     """)
 
     op.execute("""
     UPDATE user_profiles
-    SET experience_level = LOWER(experience_level::text)
+    SET experience_level = LOWER(experience_level::text)::experience_level
     WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)
     """)
