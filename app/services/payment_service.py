@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
@@ -23,6 +23,8 @@ from app.models.subscription import (
     Payment,
     PaymentStatus,
     PlanTier,
+    Subscription,
+    SubscriptionStatus,
     PLAN_PRICES,
 )
 from app.services.subscription_service import subscription_service
@@ -33,6 +35,9 @@ logger = structlog.get_logger()
 class PaymentService:
     """Razorpay payment processing service."""
 
+    # Cache for Razorpay plan IDs to avoid creating duplicates
+    _plan_cache: dict[PlanTier, str] = {}
+
     @property
     def _razorpay_auth(self) -> tuple[str, str]:
         return (settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
@@ -40,6 +45,136 @@ class PaymentService:
     @property
     def _base_url(self) -> str:
         return "https://api.razorpay.com/v1"
+
+    async def create_razorpay_plan(self, plan: PlanTier) -> str:
+        """
+        Create or retrieve a Razorpay Plan for monthly recurring billing.
+        Caches plan_ids to avoid creating duplicates.
+        Returns the razorpay plan_id.
+        """
+        # Check cache first
+        if plan in self._plan_cache:
+            logger.info("Using cached Razorpay plan", plan=plan.value, plan_id=self._plan_cache[plan])
+            return self._plan_cache[plan]
+
+        try:
+            plan_payload = {
+                "period": "monthly",
+                "interval": 1,
+                "item": {
+                    "name": f"Applivo {plan.value} Plan",
+                    "description": f"Monthly subscription for {plan.value} plan",
+                    "amount": PLAN_PRICES[plan],
+                    "currency": "INR",
+                }
+            }
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{self._base_url}/plans",
+                    auth=self._razorpay_auth,
+                    json=plan_payload,
+                )
+                response.raise_for_status()
+                plan_data = response.json()
+
+            plan_id = plan_data["id"]
+            self._plan_cache[plan] = plan_id
+            logger.info("Razorpay plan created", plan=plan.value, plan_id=plan_id)
+            return plan_id
+
+        except httpx.HTTPStatusError as e:
+            logger.error("Razorpay plan creation failed", error=str(e), status=e.response.status_code)
+            raise RuntimeError(f"Failed to create Razorpay plan: {e.response.text}")
+        except Exception as e:
+            logger.error("Razorpay plan creation failed", error=str(e))
+            raise RuntimeError(f"Failed to create Razorpay plan: {str(e)}")
+
+    async def create_razorpay_subscription(
+        self,
+        user_id: str,
+        plan: PlanTier,
+        charge_after_days: int = 7,
+        customer_email: Optional[str] = None,
+        customer_name: Optional[str] = None,
+    ) -> dict:
+        """
+        Create a Razorpay Subscription that starts billing after trial ends.
+        User saves card during checkout but is not charged until start_at.
+        Returns the subscription response with short_url for frontend.
+        """
+        try:
+            # Get or create Razorpay plan
+            razorpay_plan_id = await self.create_razorpay_plan(plan)
+
+            # Calculate when to start billing (after trial period)
+            start_timestamp = int((datetime.now(timezone.utc) + timedelta(days=charge_after_days)).timestamp())
+
+            subscription_payload = {
+                "plan_id": razorpay_plan_id,
+                "total_count": 12,
+                "quantity": 1,
+                "start_at": start_timestamp,
+                "customer_notify": 1,
+                "notes": {
+                    "user_id": user_id,
+                    "plan": plan.value,
+                    "trial_days": charge_after_days,
+                }
+            }
+
+            if customer_email:
+                subscription_payload["customer_email"] = customer_email
+            if customer_name:
+                subscription_payload["customer_name"] = customer_name
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{self._base_url}/subscriptions",
+                    auth=self._razorpay_auth,
+                    json=subscription_payload,
+                )
+                response.raise_for_status()
+                subscription_data = response.json()
+
+            # Store the subscription in our database
+            async with get_db_context() as db:
+                sub = Subscription(
+                    user_id=user_id,
+                    plan=plan,
+                    status=SubscriptionStatus.PENDING,
+                    is_trial=False,
+                    start_date=datetime.now(timezone.utc),
+                    end_date=datetime.now(timezone.utc) + timedelta(days=charge_after_days),
+                    trial_end_date=datetime.now(timezone.utc) + timedelta(days=charge_after_days),
+                    razorpay_subscription_id=subscription_data["id"],
+                )
+                db.add(sub)
+                await db.commit()
+                await db.refresh(sub)
+
+            logger.info(
+                "Razorpay subscription created",
+                plan=plan.value,
+                user_id=user_id,
+                subscription_id=subscription_data["id"],
+                start_at=start_timestamp,
+            )
+
+            return {
+                "subscription_id": subscription_data["id"],
+                "short_url": subscription_data.get("short_url", ""),
+                "user_id": user_id,
+                "plan": plan.value,
+                "trial_days": charge_after_days,
+            }
+
+        except httpx.HTTPStatusError as e:
+            logger.error("Razorpay subscription creation failed", error=str(e), status=e.response.status_code)
+            raise RuntimeError(f"Failed to create Razorpay subscription: {e.response.text}")
+        except Exception as e:
+            logger.error("Razorpay subscription creation failed", error=str(e))
+            raise RuntimeError(f"Failed to create Razorpay subscription: {str(e)}")
 
     async def create_order(
         self,

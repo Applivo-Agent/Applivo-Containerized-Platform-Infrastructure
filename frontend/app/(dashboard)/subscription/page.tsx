@@ -166,6 +166,11 @@ export default function SubscriptionPage() {
   const olderPayments = allPayments.slice(1);
   const latestPaymentMeta = paymentStatusMeta(latestPayment?.status);
 
+  const trialDaysRemaining = sub?.trial_days_remaining ?? 0;
+  const isTrialExpired = sub?.status === "TRIAL_EXPIRED";
+  const isOnTrial = sub?.status === "TRIAL" && trialDaysRemaining > 0;
+  const noAutopay = sub?.status === "TRIAL" && !sub?.autopay_enabled;
+
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center gap-3">
@@ -177,6 +182,70 @@ export default function SubscriptionPage() {
           <p className="text-sm text-zinc-400 mt-1">Manage your Applivo billing loop and quotas</p>
         </div>
       </div>
+
+      {/* Trial Banners */}
+      {isOnTrial && (
+        <div className="bg-amber-950/40 border border-amber-700/50 rounded-2xl p-4 md:p-5 shadow-lg">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold text-amber-100 flex items-center gap-2">
+                <span>⏳</span> You are on a 7-day free trial
+              </p>
+              <p className="text-sm text-amber-200/80 mt-2">
+                {trialDaysRemaining} {trialDaysRemaining === 1 ? "day" : "days"} remaining. Your card will be charged ₹199 when the trial ends.
+              </p>
+            </div>
+            <button
+              onClick={() => alert("Razorpay subscription management coming soon")}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition whitespace-nowrap"
+            >
+              Manage Autopay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {noAutopay && (
+        <div className="bg-orange-950/40 border border-orange-700/50 rounded-2xl p-4 md:p-5 shadow-lg">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold text-orange-100 flex items-center gap-2">
+                <span>⚠️</span> No payment method saved
+              </p>
+              <p className="text-sm text-orange-200/80 mt-2">
+                Add your card to avoid losing access after your trial ends in {trialDaysRemaining} days.
+              </p>
+            </div>
+            <button
+              onClick={() => alert("Start autopay flow coming soon")}
+              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition whitespace-nowrap"
+            >
+              Add Card
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isTrialExpired && (
+        <div className="bg-red-950/40 border border-red-700/50 rounded-2xl p-4 md:p-5 shadow-lg">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold text-red-100 flex items-center gap-2">
+                <span>❌</span> Your free trial has ended
+              </p>
+              <p className="text-sm text-red-200/80 mt-2">
+                Subscribe to continue using Applivo. Choose a plan and start your paid subscription.
+              </p>
+            </div>
+            <button
+              onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" })}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition whitespace-nowrap"
+            >
+              Subscribe Now
+            </button>
+          </div>
+        </div>
+      )}
 
       {latestPayment && (
         <div className="bg-[#232327] border border-white/10 rounded-2xl p-4 md:p-5 shadow-lg">

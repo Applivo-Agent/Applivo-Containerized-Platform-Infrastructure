@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -37,6 +38,8 @@ class SubscriptionStatus(str, enum.Enum):
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
     PENDING = "PENDING"
+    TRIAL = "TRIAL"
+    TRIAL_EXPIRED = "TRIAL_EXPIRED"
 
 
 class PaymentStatus(str, enum.Enum):
@@ -122,6 +125,14 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
         String(255), nullable=True,
     )
 
+    # Trial fields
+    is_trial: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+    )
+    trial_end_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
     # Relationship
     user: Mapped["User"] = relationship("User", back_populates="subscriptions")
     payments: Mapped[list["Payment"]] = relationship(
@@ -146,6 +157,13 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
         return PLAN_PRICES.get(PlanTier(self.plan), 20000)
 
     def is_active(self) -> bool:
+        # Check if subscription is in an active status
+        if self.status == SubscriptionStatus.TRIAL:
+            if self.trial_end_date:
+                trial_end = self.trial_end_date.replace(tzinfo=timezone.utc) if self.trial_end_date.tzinfo is None else self.trial_end_date
+                return trial_end >= datetime.now(timezone.utc)
+            return False
+        
         if self.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.SUCCESS]:
             return False
         if self.end_date:

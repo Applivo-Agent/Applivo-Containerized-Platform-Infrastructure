@@ -11,12 +11,13 @@ import hmac
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.api.routes.auth import get_current_user
 from app.models.user import User
-from app.models.subscription import PlanTier
+from app.models.subscription import PlanTier, Subscription, SubscriptionStatus
 from app.services.payment_service import payment_service
 from app.core.config import settings
 
@@ -99,6 +100,77 @@ async def payment_history(
     return {"payments": history}
 
 
+class StartTrialWithAutoPayRequest(BaseModel):
+    plan: str  # "starter"
+
+
+@router.post("/start-trial-with-autopay")
+async def start_trial_with_autopay(
+    data: StartTrialWithAutoPayRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Start a trial subscription with automatic payment collection after trial ends.
+    User saves their card and is charged after 7 days.
+    """
+    try:
+        plan = PlanTier(data.plan.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid plan: {data.plan}. Currently only 'starter' trial is available.",
+        )
+
+    # Only Starter plan has trial
+    if plan != PlanTier.STARTER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Starter plan offers a free trial.",
+        )
+
+    try:
+        from app.core.database import get_db_context
+        from sqlalchemy import select
+
+        # Check if user already has active subscription or trial
+        async with get_db_context() as db:
+            result = await db.execute(
+                select(Subscription).where(
+                    Subscription.user_id == current_user.id,
+                    Subscription.status.in_([
+                        SubscriptionStatus.ACTIVE,
+                        SubscriptionStatus.SUCCESS,
+                        SubscriptionStatus.TRIAL,
+                        SubscriptionStatus.PENDING,
+                    ])
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="User already has an active subscription or trial.",
+                )
+
+        # Create Razorpay subscription with autopay
+        result = await payment_service.create_razorpay_subscription(
+            user_id=current_user.id,
+            plan=plan,
+            charge_after_days=7,
+            customer_email=current_user.email,
+            customer_name=current_user.full_name,
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to start trial with autopay", error=str(e), user_id=current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start trial: {str(e)}",
+        )
+
+
 @router.post("/webhook")
 async def razorpay_webhook(request: Request):
     """
@@ -141,6 +213,7 @@ async def razorpay_webhook(request: Request):
     payload = event.get("payload", {})
     payment_entity = payload.get("payment", {})
     order_entity = payload.get("order", {})
+    subscription_entity = payload.get("subscription", {})
 
     logger.info(f"Razorpay webhook received: {event_type}")
 
@@ -168,6 +241,119 @@ async def razorpay_webhook(request: Request):
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to activate subscription",
                 )
+
+    elif event_type == "subscription.charged":
+        # Razorpay charged the saved card for recurring billing
+        sub_data = subscription_entity.get("entity", subscription_entity)
+        razorpay_subscription_id = sub_data.get("id")
+
+        logger.info(f"Processing subscription charge: {razorpay_subscription_id}")
+
+        if razorpay_subscription_id:
+            try:
+                from app.core.database import get_db_context
+                from sqlalchemy import select
+                from app.models.subscription import Subscription, SubscriptionStatus
+                from app.services.notification_service import NotificationService
+
+                async with get_db_context() as db:
+                    result = await db.execute(
+                        select(Subscription).where(
+                            Subscription.razorpay_subscription_id == razorpay_subscription_id
+                        )
+                    )
+                    sub = result.scalar_one_or_none()
+                    if sub:
+                        sub.status = SubscriptionStatus.ACTIVE
+                        sub.start_date = datetime.now(timezone.utc)
+                        sub.end_date = datetime.now(timezone.utc) + timedelta(days=30)
+                        await db.commit()
+
+                        # Send notification
+                        try:
+                            from app.models.user import User
+                            user_result = await db.execute(select(User).where(User.id == sub.user_id))
+                            user = user_result.scalar_one_or_none()
+                            if user:
+                                await NotificationService().notify(
+                                    title="🎉 Payment Successful - Subscription Active",
+                                    body=f"""Your {sub.plan.value} plan is now active!
+
+Your subscription is valid until {sub.end_date.strftime('%B %d, %Y')}.
+
+Thank you for subscribing to Applivo!""",
+                                    event_type="subscription_charged",
+                                    data={"plan": sub.plan.value},
+                                    user_id=sub.user_id,
+                                )
+                        except Exception as ne:
+                            logger.warning("Failed to send subscription success notification", error=str(ne))
+
+                        logger.info(f"Subscription activated via charge: {razorpay_subscription_id}")
+            except Exception as e:
+                logger.error(f"Failed to handle subscription charge: {e}")
+
+    elif event_type == "subscription.halted":
+        # Payment failed for recurring billing
+        sub_data = subscription_entity.get("entity", subscription_entity)
+        razorpay_subscription_id = sub_data.get("id")
+
+        logger.warning(f"Subscription halted (payment failed): {razorpay_subscription_id}")
+
+        if razorpay_subscription_id:
+            try:
+                from app.core.database import get_db_context
+                from sqlalchemy import select
+                from app.models.subscription import Subscription, SubscriptionStatus
+                from app.models.user import User
+                from app.services.notification_service import NotificationService
+
+                async with get_db_context() as db:
+                    result = await db.execute(
+                        select(Subscription).where(
+                            Subscription.razorpay_subscription_id == razorpay_subscription_id
+                        )
+                    )
+                    sub = result.scalar_one_or_none()
+                    if sub:
+                        sub.status = SubscriptionStatus.TRIAL_EXPIRED
+                        await db.commit()
+
+                        # Disable auto-apply
+                        try:
+                            from app.models.user import UserProfile
+                            profile_result = await db.execute(
+                                select(UserProfile).where(UserProfile.user_id == sub.user_id)
+                            )
+                            profile = profile_result.scalar_one_or_none()
+                            if profile:
+                                profile.auto_apply_enabled = False
+                                await db.commit()
+                        except Exception as pe:
+                            logger.warning("Failed to disable auto-apply after subscription halt", error=str(pe))
+
+                        # Send notification
+                        try:
+                            user_result = await db.execute(select(User).where(User.id == sub.user_id))
+                            user = user_result.scalar_one_or_none()
+                            if user:
+                                await NotificationService().notify(
+                                    title="⚠️ Payment Failed - Please Update Your Card",
+                                    body=f"""Your payment for the {sub.plan.value} plan failed. 
+
+Your subscription has been paused. Please update your payment method to continue using Applivo.
+
+Visit your account settings to manage your payment method.""",
+                                    event_type="subscription_halted",
+                                    data={"plan": sub.plan.value},
+                                    user_id=sub.user_id,
+                                )
+                        except Exception as ne:
+                            logger.warning("Failed to send subscription halted notification", error=str(ne))
+
+                        logger.info(f"Subscription halted: {razorpay_subscription_id}")
+            except Exception as e:
+                logger.error(f"Failed to handle subscription halt: {e}")
 
     elif event_type == "payment.failed":
         razorpay_order_id = order_entity.get("id")

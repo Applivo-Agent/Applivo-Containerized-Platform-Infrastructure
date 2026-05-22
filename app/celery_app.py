@@ -70,6 +70,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.send_daily_digest",
         "schedule": crontab(hour=9, minute=0),
     },
+    "send-trial-expiry-reminders": {
+        "task": "app.celery_tasks.send_trial_expiry_reminders",
+        "schedule": crontab(hour=9, minute=0),
+    },
     "check-expired-subscriptions": {
         "task": "app.celery_tasks.check_expired_subscriptions",
         "schedule": crontab(hour=0, minute=0),

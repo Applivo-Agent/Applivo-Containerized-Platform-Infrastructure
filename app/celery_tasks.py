@@ -283,32 +283,143 @@ def send_daily_digest():
 
 @celery_app.task
 def check_expired_subscriptions():
-    """Deactivate expired subscriptions."""
+    """Deactivate expired subscriptions and handle trial expirations with autopay."""
     try:
         from app.core.database import get_db_context
         from app.models.subscription import Subscription, SubscriptionStatus
-        from sqlalchemy import select, String, func
-        from datetime import datetime, timezone
+        from sqlalchemy import select, String, func, and_
+        from datetime import datetime, timezone, timedelta
 
         async def _check():
             async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                count_expired = 0
+
+                # Handle expired ACTIVE subscriptions
                 result = await db.execute(
                     select(Subscription).where(
                         func.lower(Subscription.status.cast(String)) == SubscriptionStatus.ACTIVE.value,
-                        Subscription.end_date < datetime.now(timezone.utc),
+                        Subscription.end_date < now,
                     )
                 )
                 expired = result.scalars().all()
                 for sub in expired:
                     sub.status = SubscriptionStatus.EXPIRED
                     logger.info("Subscription expired", user_id=sub.user_id, sub_id=sub.id)
+                    count_expired += 1
+                
+                # Handle expired TRIAL subscriptions
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status == SubscriptionStatus.TRIAL,
+                        Subscription.trial_end_date < now,
+                    )
+                )
+                expired_trials = result.scalars().all()
+                for sub in expired_trials:
+                    if sub.razorpay_subscription_id:
+                        # Trial with autopay: set to PENDING (waiting for Razorpay to charge)
+                        sub.status = SubscriptionStatus.PENDING
+                        logger.info("Trial ended, waiting for autopay charge", user_id=sub.user_id, sub_id=sub.id)
+                    else:
+                        # Trial without autopay: mark as TRIAL_EXPIRED and disable auto-apply
+                        sub.status = SubscriptionStatus.TRIAL_EXPIRED
+                        try:
+                            from app.models.user import UserProfile
+                            profile_result = await db.execute(
+                                select(UserProfile).where(UserProfile.user_id == sub.user_id)
+                            )
+                            profile = profile_result.scalar_one_or_none()
+                            if profile:
+                                profile.auto_apply_enabled = False
+                        except Exception as pe:
+                            logger.warning("Failed to disable auto-apply after trial expiry", error=str(pe))
+                        logger.info("Trial ended without autopay", user_id=sub.user_id, sub_id=sub.id)
+                    count_expired += 1
+
                 await db.commit()
-                return len(expired)
+                return count_expired
 
         count = _run_async(_check())
-        logger.info("Expired subscriptions checked", expired_count=count)
+        logger.info("Subscription check completed", expired_count=count)
     except Exception as e:
         logger.error("Subscription check failed", error=str(e))
+
+
+@celery_app.task
+def send_trial_expiry_reminders():
+    """Send email reminders to users whose trial ends tomorrow."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
+        from app.services.notification_service import NotificationService
+        from sqlalchemy import select, and_
+        from datetime import datetime, timezone, timedelta
+
+        async def _send_reminders():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                tomorrow = now + timedelta(days=1)
+                day_after = now + timedelta(days=2)
+
+                # Find trials ending tomorrow
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status == SubscriptionStatus.TRIAL,
+                        Subscription.trial_end_date >= tomorrow,
+                        Subscription.trial_end_date < day_after,
+                    )
+                )
+                trials = result.scalars().all()
+                sent_count = 0
+
+                for sub in trials:
+                    try:
+                        user_result = await db.execute(
+                            select(User).where(User.id == sub.user_id)
+                        )
+                        user = user_result.scalar_one_or_none()
+                        if not user:
+                            continue
+
+                        if sub.razorpay_subscription_id:
+                            # Has autopay: inform about automatic charge
+                            message_body = f"""Your 7-day free trial for Applivo ends tomorrow!
+
+Your card will be automatically charged ₹199 for the {sub.plan.value} plan.
+
+If you wish to cancel or change your plan, visit your subscription settings.
+
+Thank you for using Applivo!"""
+                        else:
+                            # No autopay: remind to add card
+                            message_body = f"""Your 7-day free trial for Applivo ends tomorrow!
+
+To continue using Applivo after your trial, please add your payment method in your account settings.
+
+Don't lose access to your account — add your card now!
+
+₹199/month for the {sub.plan.value} plan."""
+
+                        await NotificationService().notify(
+                            title="⏳ Your Trial Ends Tomorrow",
+                            body=message_body,
+                            event_type="trial_expiry_reminder",
+                            data={"plan": sub.plan.value, "trial_end": sub.trial_end_date.isoformat()},
+                            user_id=sub.user_id,
+                        )
+                        sent_count += 1
+                        logger.info("Trial expiry reminder sent", user_id=sub.user_id)
+                    except Exception as e:
+                        logger.warning("Failed to send trial expiry reminder", user_id=sub.user_id, error=str(e))
+
+                return sent_count
+
+        count = _run_async(_send_reminders())
+        logger.info("Trial expiry reminders sent", count=count)
+    except Exception as e:
+        logger.error("Send trial expiry reminders failed", error=str(e))
 
 
 @celery_app.task

@@ -101,6 +101,41 @@ class SubscriptionService:
             logger.info("Subscription cancelled", user_id=user_id, sub_id=sub.id)
             return sub
 
+    async def create_trial_subscription(self, user_id: str) -> Optional[Subscription]:
+        """
+        Create a 7-day free trial subscription for a new user.
+        Returns None if user has already had a trial before.
+        """
+        async with get_db_context() as db:
+            # Check if user has ever had a trial
+            result = await db.execute(
+                select(Subscription).where(
+                    Subscription.user_id == user_id,
+                    Subscription.is_trial == True,
+                )
+            )
+            existing_trial = result.scalar_one_or_none()
+            if existing_trial:
+                logger.info("User already had a trial", user_id=user_id)
+                return None
+            
+            # Create trial subscription
+            now = datetime.now(timezone.utc)
+            sub = Subscription(
+                user_id=user_id,
+                plan=PlanTier.STARTER,
+                status=SubscriptionStatus.TRIAL,
+                is_trial=True,
+                start_date=now,
+                end_date=now + timedelta(days=7),
+                trial_end_date=now + timedelta(days=7),
+            )
+            db.add(sub)
+            await db.commit()
+            await db.refresh(sub)
+            logger.info("Trial subscription created", user_id=user_id, sub_id=sub.id)
+            return sub
+
     async def renew_subscription(
         self, user_id: str, duration_days: int = 30,
     ) -> Optional[Subscription]:

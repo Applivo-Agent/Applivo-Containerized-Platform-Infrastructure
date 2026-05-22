@@ -309,6 +309,15 @@ async def register_verify(
     session.access_token_jti = jti
     await db.commit()
 
+    # Create 7-day free trial for new users
+    try:
+        from app.services.subscription_service import subscription_service
+        trial_sub = await subscription_service.create_trial_subscription(user.id)
+        if trial_sub:
+            log.info("Trial subscription created for new user", user_id=user.id, sub_id=trial_sub.id)
+    except Exception as e:
+        log.warning("Failed to create trial subscription for new user", user_id=user.id, error=str(e))
+
     greeting_subject, greeting_body = _build_new_user_greeting(user.full_name)
     try:
         send_result = await NotificationService().send_email_to_user(

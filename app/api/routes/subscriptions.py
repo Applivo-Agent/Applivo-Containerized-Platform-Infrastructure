@@ -113,21 +113,34 @@ async def list_plans():
 async def get_current_subscription(
     current_user: User = Depends(get_current_user),
 ):
-    """Get the user's current active subscription."""
+    """Get the user's current active subscription with trial details."""
     sub = await subscription_service.get_active_subscription(current_user.id)
     if not sub:
         return {"active": False, "plan": None, "subscription": None}
 
     features = await subscription_service.get_plan_features(current_user.id)
+    
+    # Calculate trial days remaining
+    trial_days_remaining = 0
+    if sub.status == SubscriptionStatus.TRIAL and sub.trial_end_date:
+        trial_end = sub.trial_end_date.replace(tzinfo=timezone.utc) if sub.trial_end_date.tzinfo is None else sub.trial_end_date
+        now = datetime.now(timezone.utc)
+        trial_days_remaining = max(0, (trial_end - now).days)
+    
     return {
         "active": True,
         "subscription": {
             "id": sub.id,
             "plan": sub.plan if hasattr(sub, 'plan') else None,
             "status": sub.status.value if hasattr(sub.status, 'value') else sub.status,
+            "is_trial": sub.is_trial if hasattr(sub, 'is_trial') else False,
+            "trial_days_remaining": trial_days_remaining,
+            "trial_end_date": sub.trial_end_date.isoformat() if sub.trial_end_date else None,
             "start_date": sub.start_date.isoformat(),
             "end_date": sub.end_date.isoformat() if sub.end_date else None,
             "daily_limit": sub.daily_limit,
+            "autopay_enabled": bool(sub.razorpay_subscription_id),
+            "ai_credits": sub.ai_credits,
         },
         "features": features,
     }
