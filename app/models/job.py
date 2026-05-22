@@ -32,14 +32,14 @@ from app.models.base import TimestampMixin, UUIDMixin
 # ── Enums ────────────────────────────────────────────────────────────────────
 
 class JobSource(str, enum.Enum):
-    LINKEDIN = "LINKEDIN"
-    INDEED = "INDEED"
-    INTERNSHALA = "INTERNSHALA"
-    REMOTEOK = "REMOTEOK"
-    WELLFOUND = "WELLFOUND"
-    GLASSDOOR = "GLASSDOOR"
-    COMPANY_SITE = "COMPANY_SITE"
-    MANUAL = "MANUAL"
+    LINKEDIN = "linkedin"
+    INDEED = "indeed"
+    INTERNSHALA = "internshala"
+    REMOTEOK = "remoteok"
+    WELLFOUND = "wellfound"
+    GLASSDOOR = "glassdoor"
+    COMPANY_SITE = "company_site"
+    MANUAL = "manual"
 
 
 class JobType(str, enum.Enum):

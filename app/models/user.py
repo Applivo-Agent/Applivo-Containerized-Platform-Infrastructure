@@ -32,12 +32,12 @@ import enum
 
 
 class ExperienceLevel(str, enum.Enum):
-    ENTRY = "ENTRY"
-    MID = "MID"
-    SENIOR = "SENIOR"
-    LEAD = "LEAD"
-    EXECUTIVE = "EXECUTIVE"
-    UNKNOWN = "UNKNOWN"
+    ENTRY = "entry"
+    MID = "mid"
+    SENIOR = "senior"
+    LEAD = "lead"
+    EXECUTIVE = "executive"
+    UNKNOWN = "unknown"
 
 
 class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
