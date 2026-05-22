@@ -137,7 +137,7 @@ export default function SettingsPage() {
                     s.notify_via_email ? "bg-white border-white" : "bg-[#161616] border-zinc-800")}
                     onClick={() => updateMut.mutate({ notify_via_email: !s.notify_via_email })}>
                     <div className={cn("absolute top-0.5 w-4 h-4 rounded-full transition-all shadow-md", 
-                      s.notify_via_email ? "left-6 bg-[#0B0B0F]" : "left-0.5 bg-[#A1A1AA]"} />
+                      s.notify_via_email ? "left-6 bg-[#0B0B0F]" : "left-0.5 bg-[#A1A1AA]")} />
                   </div>
                 </div>
 
@@ -150,7 +150,7 @@ export default function SettingsPage() {
                     s.notify_via_telegram ? "bg-white border-white" : "bg-[#161616] border-zinc-800")}
                     onClick={() => updateMut.mutate({ notify_via_telegram: !s.notify_via_telegram })}>
                     <div className={cn("absolute top-0.5 w-4 h-4 rounded-full transition-all shadow-md", 
-                      s.notify_via_telegram ? "left-6 bg-[#0B0B0F]" : "left-0.5 bg-[#A1A1AA]"} />
+                      s.notify_via_telegram ? "left-6 bg-[#0B0B0F]" : "left-0.5 bg-[#A1A1AA]")} />
                   </div>
                 </div>
               </div>

@@ -76,8 +76,8 @@ function ResumeBuilderCard() {
             {displayedText}
             {isTyping && <span className="text-[#ffffff] ml-0.5 animate-pulse">|</span>}
           </p>
-          <button className="ml-auto w-9 h-9 rounded-xl bg-[#ffffff] hover:bg-[#38bdf8] flex items-center justify-center transition-colors shrink-0">
-            <Send className="w-4 h-4 text-white" />
+          <button className="ml-auto w-9 h-9 rounded-xl bg-[#ffffff] hover:bg-[#38bdf8] flex items-center justify-center transition-colors shrink-0 opacity-100 cursor-pointer">
+            <Send className="w-4 h-4 text-[#0d0d0d]" />
           </button>
         </div>
       </div>
