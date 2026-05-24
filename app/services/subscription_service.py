@@ -32,7 +32,7 @@ class SubscriptionService:
     async def get_active_subscription(
         self, user_id: str, db:Optional[AsyncSession] = None,
     ) -> Optional[Subscription]:
-        """Get the user's currently active subscription."""
+        """Get the user's currently active subscription (including trials)."""
         async def _query(session: AsyncSession) -> Optional[Subscription]:
             result = await session.execute(
                 select(Subscription)
@@ -40,20 +40,31 @@ class SubscriptionService:
                     Subscription.user_id == user_id,
                     func.lower(Subscription.status.cast(String)).in_([
                         SubscriptionStatus.ACTIVE.value.lower(),
-                        "success"
+                        "success",
+                        SubscriptionStatus.TRIAL.value.lower(),
+                        SubscriptionStatus.PENDING.value.lower(),
                     ])
                 )
                 .order_by(Subscription.created_at.desc())
                 .limit(1)
             )
             sub = result.scalar_one_or_none()
-            if sub and sub.end_date:
-                end_date = sub.end_date.replace(tzinfo=timezone.utc) if sub.end_date.tzinfo is None else sub.end_date
-                if end_date < datetime.now(timezone.utc):
-                    sub.status = SubscriptionStatus.EXPIRED
-                    await session.commit()
-                    logger.info("Subscription expired", user_id=user_id, sub_id=sub.id)
-                    return None
+            if sub:
+                # Check if subscription/trial has expired
+                if sub.status == SubscriptionStatus.TRIAL and sub.trial_end_date:
+                    trial_end = sub.trial_end_date.replace(tzinfo=timezone.utc) if sub.trial_end_date.tzinfo is None else sub.trial_end_date
+                    if trial_end < datetime.now(timezone.utc):
+                        sub.status = SubscriptionStatus.TRIAL_EXPIRED
+                        await session.commit()
+                        logger.info("Trial expired", user_id=user_id, sub_id=sub.id)
+                        return None
+                elif sub.end_date:
+                    end_date = sub.end_date.replace(tzinfo=timezone.utc) if sub.end_date.tzinfo is None else sub.end_date
+                    if end_date < datetime.now(timezone.utc):
+                        sub.status = SubscriptionStatus.EXPIRED
+                        await session.commit()
+                        logger.info("Subscription expired", user_id=user_id, sub_id=sub.id)
+                        return None
             return sub
 
         if db:
