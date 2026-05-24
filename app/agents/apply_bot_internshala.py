@@ -2890,4 +2890,4 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         if "Login modal" in str(e):
             logger.warning("Login modal detected during form fill", error=str(e))
             return {"success": False, "error": "Internshala anti-bot detection: login modal served instead of application form", "bot_detected": True}
-        raise   
+        raise  
