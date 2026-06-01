@@ -29,8 +29,23 @@ from app.schemas import (
     ApplicationCreate, ApplicationOut, ApplicationStatusUpdate,
     ApplicationStats, MessageResponse, PaginatedResponse
 )
+from app.services.subscription_service import subscription_service
 
 applications_router = APIRouter(prefix="/applications", tags=["Applications"])
+
+
+async def require_active_subscription(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency that ensures user has an active paid subscription."""
+    if current_user.is_superuser:
+        return current_user
+    
+    sub = await subscription_service.get_active_subscription(current_user.id)
+    if not sub or not sub.is_active():
+        raise HTTPException(
+            status_code=403,
+            detail="Active subscription required for this feature. Please upgrade your plan."
+        )
+    return current_user
 
 
 def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
@@ -301,9 +316,9 @@ async def create_application(
     background_tasks: BackgroundTasks,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_active_subscription),
 ):
-    """Queue a new application (manual or bot-assisted)."""
+    """Queue a new application (manual or bot-assisted). Requires active subscription."""
     # Verify job exists
     job_result = await db.execute(select(Job).where(Job.id == payload.job_id))
     job = job_result.scalar_one_or_none()

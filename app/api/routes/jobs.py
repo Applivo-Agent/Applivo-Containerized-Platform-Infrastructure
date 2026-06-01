@@ -17,8 +17,23 @@ from app.api.routes.auth import get_current_user
 from app.models.user import User
 from app.models.job import Job, JobAnalysis, JobStatus, JobSource
 from app.schemas import JobOut, JobCreate, JobFilter, PaginatedResponse, MessageResponse
+from app.services.subscription_service import subscription_service
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+
+
+async def require_active_subscription(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency that ensures user has an active paid subscription."""
+    if current_user.is_superuser:
+        return current_user
+    
+    sub = await subscription_service.get_active_subscription(current_user.id)
+    if not sub or not sub.is_active():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Active subscription required for this feature. Please upgrade your plan."
+        )
+    return current_user
 
 
 def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
@@ -128,9 +143,9 @@ async def get_job_count(
 @router.post("/scrape")
 async def trigger_scrape(
     source: Optional[str] = Query(default=None, description="Specific source to scrape: internshala, remoteok, indeed, linkedin"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_active_subscription),
 ):
-    """Trigger the job scraping agent to run for the current user."""
+    """Trigger the job scraping agent to run for the current user. Requires active subscription."""
     import structlog
     log = structlog.get_logger()
 
