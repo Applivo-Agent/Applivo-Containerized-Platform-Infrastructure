@@ -10,7 +10,7 @@ import { cn, formatDate, getStatusClass, getStatusLabel, getMatchBadgeClass, tim
 import {
   Briefcase, FileText, Send, TrendingUp, Clock, Zap,
   AlertCircle, Star, ChevronRight, Play, Pause, RefreshCw, CheckCircle,
-  Activity, Target, Rocket, Lock, ExternalLink
+  Activity, Target, Rocket, Lock, ExternalLink, Crown
   , Loader2
 } from "lucide-react";
 import { toast } from "sonner";
@@ -177,7 +177,7 @@ function AnalyzeTokenCard({ budget }: { budget: any }) {
 export default function DashboardPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const { quota, subscription, canAccess } = useSubscription();
+  const { quota, subscription, canAccess, isActive } = useSubscription();
   const greeting = (() => {
     const hour = new Date().getHours();
     if (hour < 12) return "morning";
@@ -303,56 +303,58 @@ export default function DashboardPage() {
   return (
     <div className="max-w-[1600px] mx-auto space-y-8 p-1 md:p-4 min-h-[90vh]">
 
-      {/* Header Actions */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-        <h2 className="text-xl font-bold tracking-tight text-white/90 hidden md:block">System Overview</h2>
-        <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
-          <button
-            onClick={handleScrapeJobs}
-            disabled={isWorking}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-          >
-            {isWorking && currentTask === "scrape_jobs" ? (
-              <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Scraping...</>
-            ) : (
-              <><Play className="w-4 h-4 text-zinc-400" /> Scrape</>
-            )}
-          </button>
-          <button
-            onClick={handleAnalyzeJobs}
-            disabled={isWorking}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-          >
-            {isWorking && currentTask === "analyze_jobs" ? (
-              <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Analyzing...</>
-            ) : (
-              <><Zap className="w-4 h-4 text-zinc-400 fill-zinc-400" /> Analyze</>
-            )}
-          </button>
-          <button
-            onClick={handleQueueJobs}
-            disabled={isWorking}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-          >
-            {isWorking && currentTask === "queue_jobs" ? (
-              <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Queueing...</>
-            ) : (
-              <><Activity className="w-4 h-4 text-zinc-400" /> Queue</>
-            )}
-          </button>
-          <button
-            onClick={handleApplyQueued}
-            disabled={isWorking}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e] hover:bg-[#2a2a2a] text-sm font-medium text-white transition-all rounded-lg border border-[#2a2a2a]"
-          >
-            {isWorking && (currentTask === "apply_queued" || currentTask === "apply_jobs") ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /> Deploying...</>
-            ) : (
-              <><Send className="w-4 h-4" /> Deploy</>
-            )}
-          </button>
+      {/* Header Actions - Only for active subscriptions */}
+      {isActive && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+          <h2 className="text-xl font-bold tracking-tight text-white/90 hidden md:block">System Overview</h2>
+          <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
+            <button
+              onClick={handleScrapeJobs}
+              disabled={isWorking}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
+            >
+              {isWorking && currentTask === "scrape_jobs" ? (
+                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Scraping...</>
+              ) : (
+                <><Play className="w-4 h-4 text-zinc-400" /> Scrape</>
+              )}
+            </button>
+            <button
+              onClick={handleAnalyzeJobs}
+              disabled={isWorking}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
+            >
+              {isWorking && currentTask === "analyze_jobs" ? (
+                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Analyzing...</>
+              ) : (
+                <><Zap className="w-4 h-4 text-zinc-400 fill-zinc-400" /> Analyze</>
+              )}
+            </button>
+            <button
+              onClick={handleQueueJobs}
+              disabled={isWorking}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
+            >
+              {isWorking && currentTask === "queue_jobs" ? (
+                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Queueing...</>
+              ) : (
+                <><Activity className="w-4 h-4 text-zinc-400" /> Queue</>
+              )}
+            </button>
+            <button
+              onClick={handleApplyQueued}
+              disabled={isWorking}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e] hover:bg-[#2a2a2a] text-sm font-medium text-white transition-all rounded-lg border border-[#2a2a2a]"
+            >
+              {isWorking && (currentTask === "apply_queued" || currentTask === "apply_jobs") ? (
+                <><RefreshCw className="w-4 h-4 animate-spin" /> Deploying...</>
+              ) : (
+                <><Send className="w-4 h-4" /> Deploy</>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Pending approval banner */}
       {(queueStatus?.pendingApproval ?? 0) > 0 && (
@@ -413,59 +415,74 @@ export default function DashboardPage() {
       )}
 
 
-      {/* Quota + Agent status row */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-        {/* Quota ring */}
-        <QuotaRing used={safeQuota.used} limit={safeQuota.limit} />
+      {/* Quota + Agent status row - Only for active subscriptions */}
+      {isActive ? (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+          {/* Quota ring */}
+          <QuotaRing used={safeQuota.used} limit={safeQuota.limit} />
 
-        {/* Analyze token budget */}
-        <AnalyzeTokenCard budget={resolvedAnalyzeBudget} />
+          {/* Analyze token budget */}
+          <AnalyzeTokenCard budget={resolvedAnalyzeBudget} />
 
-        {/* Agent status - Premium */}
+          {/* Agent status - Premium */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-[#242424] border border-white/[0.08] rounded-2xl p-5 md:col-span-2 shadow-sm hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className={cn("w-3 h-3 rounded-full", agentStatus?.is_running ? "bg-emerald-400" : "bg-zinc-300")}>
+                  {agentStatus?.is_running && (
+                    <motion.div
+                      className="w-full h-full rounded-full bg-emerald-400"
+                      animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    />
+                  )}
+                </div>
+                <h3 className="font-bold text-sm text-white">Automation Agent</h3>
+                <div className={cn("flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-medium",
+                  agentStatus?.is_running ? "bg-emerald-500/15 text-emerald-600" : "bg-white/10 text-zinc-400")}>
+                  {agentStatus?.is_running ? "Active" : "Idle"}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Last Run</p>
+                <p className="text-sm font-semibold text-white">{agentStatus?.last_run ? timeAgo(agentStatus.last_run) : "Never"}</p>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Jobs Found</p>
+                <p className="text-sm font-semibold text-white"><AnimatedNumber value={agentStatus?.jobs_found_today ?? 0} /></p>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Applied</p>
+                <p className="text-sm font-semibold text-white"><AnimatedNumber value={agentStatus?.applications_today ?? 0} /></p>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Match Rate</p>
+                <p className="text-sm font-semibold text-white">{(dashboard?.response_rate ?? 0).toFixed(1)}%</p>
+              </motion.div>
+            </div>
+          </motion.div>
+        </div>
+      ) : (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="bg-[#242424] border border-white/[0.08] rounded-2xl p-5 md:col-span-2 shadow-sm hover:shadow-md transition-shadow"
+          className="rounded-2xl p-8 border border-white/10 bg-gradient-to-br from-[#1a1a1a] to-[#0d0d0d] text-center"
         >
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-3">
-              <div className={cn("w-3 h-3 rounded-full", agentStatus?.is_running ? "bg-emerald-400" : "bg-zinc-300")}>
-                {agentStatus?.is_running && (
-                  <motion.div
-                    className="w-full h-full rounded-full bg-emerald-400"
-                    animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                  />
-                )}
-              </div>
-              <h3 className="font-bold text-sm text-white">Automation Agent</h3>
-              <div className={cn("flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-medium",
-                agentStatus?.is_running ? "bg-emerald-500/15 text-emerald-600" : "bg-white/10 text-zinc-400")}>
-                {agentStatus?.is_running ? "Active" : "Idle"}
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Last Run</p>
-              <p className="text-sm font-semibold text-white">{agentStatus?.last_run ? timeAgo(agentStatus.last_run) : "Never"}</p>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Jobs Found</p>
-              <p className="text-sm font-semibold text-white"><AnimatedNumber value={agentStatus?.jobs_found_today ?? 0} /></p>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Applied</p>
-              <p className="text-sm font-semibold text-white"><AnimatedNumber value={agentStatus?.applications_today ?? 0} /></p>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.02 }} className="p-3 bg-[#1d1d1d] rounded-xl border border-white/[0.08]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Match Rate</p>
-              <p className="text-sm font-semibold text-white">{(dashboard?.response_rate ?? 0).toFixed(1)}%</p>
-            </motion.div>
-          </div>
+          <h3 className="text-xl font-bold text-white mb-3">Unlock Automation Features</h3>
+          <p className="text-zinc-400 mb-6 max-w-sm">Upgrade to a paid plan to access job scraping, analysis, auto-apply, and advanced automation features.</p>
+          <Link href="/subscription" className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+            <Crown className="w-4 h-4" /> Upgrade Now
+          </Link>
         </motion.div>
-      </div>
+      )}
 
       {/* Top job matches */}
       <motion.div
