@@ -154,6 +154,14 @@ export const agentApi = {
   applyOne: (applicationId: string) => api.post(`/agent/apply/${applicationId}`),
 };
 
+// ─── Workflow Pipeline ────────────────────────────────────────────────────
+export const workflowsApi = {
+  run: () => api.post("/workflows/run"),
+  latest: () => api.get("/workflows/latest"),
+  get: (id: string) => api.get(`/workflows/${id}`),
+  cancel: (id: string) => api.post(`/workflows/${id}/cancel`),
+};
+
 // ─── Analytics ────────────────────────────────────────────────────────────
 export const analyticsApi = {
   dashboard: () => api.get("/analytics/dashboard"),
@@ -185,6 +193,10 @@ export const paymentsApi = {
   createOrder: (data: { plan: string }) => api.post("/payments/create-order", data),
   verify: (data: Record<string, string>) => api.post("/payments/verify", data),
   history: () => api.get("/payments/history"),
+  startTrialWithAutopay: (data: { plan: string }) =>
+    api.post("/payments/start-trial-with-autopay", data),
+  getAutopayManageUrl: () => api.get("/payments/autopay-manage-url"),
+  cancelAutopay: () => api.post("/payments/cancel-autopay"),
 };
 
 // ─── Quotas ───────────────────────────────────────────────────────────────
@@ -215,6 +227,27 @@ export const platformApi = {
 export const settingsApi = {
   get: () => api.get("/settings"),
   update: (data: Record<string, unknown>) => api.patch("/settings", data),
+};
+
+// ─── Settings V2 (full persistence) ──────────────────────────────────────
+export const settingsV2Api = {
+  getAll: () => api.get("/settings/v2"),
+  updateGeneral: (data: Record<string, unknown>) => api.put("/settings/v2/general", data),
+  updateNotifications: (data: Record<string, unknown>) => api.put("/settings/v2/notifications", data),
+  testNotification: (channel: string) => api.post("/settings/v2/notifications/test", { channel }),
+  updateAutomation: (data: Record<string, unknown>) => api.put("/settings/v2/automation", data),
+  updateStrategy: (data: Record<string, unknown>) => api.put("/settings/v2/strategy", data),
+  updateAI: (data: Record<string, unknown>) => api.put("/settings/v2/ai", data),
+  getPlatformStatus: () => api.get("/settings/v2/platforms/status"),
+  updatePlatforms: (data: Record<string, unknown>) => api.put("/settings/v2/platforms", data),
+  updateSecurity: (data: Record<string, unknown>) => api.put("/settings/v2/security", data),
+  getSessions: () => api.get("/settings/v2/security/sessions"),
+  terminateSession: (sessionId: string) => api.post(`/settings/v2/security/sessions/${sessionId}/terminate`),
+  terminateAllSessions: () => api.post("/settings/v2/security/sessions/terminate-all"),
+  updateAdvanced: (data: Record<string, unknown>) => api.put("/settings/v2/advanced", data),
+  exportData: (types: string[], format: string) => api.post("/settings/v2/advanced/export", { types, format }),
+  resetSystem: (confirmation: string) => api.post("/settings/v2/advanced/reset", { confirmation }),
+  getAuditLogs: (limit?: number, offset?: number) => api.get("/settings/v2/audit", { params: { limit, offset } }),
 };
 
 // ─── Security ─────────────────────────────────────────────────────────────

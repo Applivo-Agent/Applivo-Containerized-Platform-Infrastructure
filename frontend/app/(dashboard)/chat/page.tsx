@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { chatApi } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Bot, BotMessageSquare, User as UserIcon, Brain, Zap, Trash2, Sparkles, Target, Search, FileText, Mail, Loader2 } from "lucide-react";
+import { Send, BotMessageSquare, User as UserIcon, Zap, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -11,14 +11,6 @@ interface Message {
   content: string;
   timestamp?: Date;
 }
-
-const personas = [
-  { id: "general", label: "General", icon: Sparkles, color: "text-white" },
-  { id: "career_coach", label: "Career Coach", icon: Target, color: "text-white" },
-  { id: "resume_expert", label: "Resume Expert", icon: FileText, color: "text-white" },
-  { id: "job_scout", label: "Job Scout", icon: Search, color: "text-white" },
-  { id: "application_assistant", label: "Apply Helper", icon: Mail, color: "text-white" },
-];
 
 function TypingIndicator() {
   return (
@@ -49,7 +41,6 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [persona, setPersona] = useState("general");
   const endRef = useRef<HTMLDivElement>(null);
 
   const queryClient = useQueryClient();
@@ -94,7 +85,7 @@ export default function ChatPage() {
     mutationFn: (msg: string) => chatApi.send({
       message: msg,
       history: messages.map(m => ({ role: m.role, content: m.content })),
-      persona,
+      persona: "general",
     }),
     onMutate: (msg) => {
       setMessages(prev => [...prev, { role: "user", content: msg, timestamp: new Date() }, { role: "assistant", content: "...", timestamp: new Date() }]);
@@ -167,30 +158,6 @@ export default function ChatPage() {
               <p className="text-xs text-zinc-400 font-medium">Powered by LLaMA-3.1-8B</p>
             </div>
           </div>
-        </div>
-
-        {/* Persona Picker */}
-        <div className="flex items-center gap-1.5 bg-white/10 p-1 rounded-xl">
-          {personas.map((p) => {
-            const Icon = p.icon;
-            const isActive = persona === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => setPersona(p.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
-                  isActive
-                    ? "bg-[#1c1c1e] shadow-sm text-white border border-zinc-800"
-                    : "text-zinc-400 hover:text-zinc-300"
-                )}
-                title={p.label}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{p.label}</span>
-              </button>
-            );
-          })}
         </div>
 
         {/* Credits Display */}

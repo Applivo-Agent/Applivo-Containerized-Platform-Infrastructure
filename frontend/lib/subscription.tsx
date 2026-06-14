@@ -12,7 +12,10 @@ export interface Subscription {
   status: string;
   start_date: string;
   end_date: string | null;
+  trial_end_date?: string | null;
   daily_limit: number;
+  trial_days_remaining?: number;
+  autopay_enabled?: boolean;
 }
 
 export interface QuotaStatus {
@@ -28,6 +31,8 @@ interface SubscriptionContextType {
   quota: QuotaStatus | null;
   plan: PlanTier;
   isActive: boolean;
+  isFree: boolean;
+  isTrial: boolean;
   isPro: boolean;
   isPremium: boolean;
   canAccess: (feature: Feature) => boolean;
@@ -196,6 +201,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       start_date: typeof candidate.start_date === "string" ? candidate.start_date : null,
       end_date: typeof candidate.end_date === "string" ? candidate.end_date : null,
       daily_limit: Number(candidate.daily_limit ?? 0),
+      trial_days_remaining: Number(candidate.trial_days_remaining ?? 0),
+      autopay_enabled: Boolean(candidate.autopay_enabled),
     } as Subscription;
   };
 
@@ -256,12 +263,15 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
   const isSuper = user?.is_superuser ?? false;
   const hasActiveStatus = normalizeStatus(subscription?.status) === "active";
+  const hasTrialStatus = normalizeStatus(subscription?.status) === "trial";
   const plan = (isSuper ? "premium" : (
-    hasActiveStatus
+    (hasActiveStatus || hasTrialStatus)
       ? normalizePlan(subscription?.plan)
       : "none"
   )) as PlanTier;
-  const isActive = isSuper || hasActiveStatus;
+  const isActive = isSuper || hasActiveStatus || hasTrialStatus;
+  const isFree = !isSuper && !hasActiveStatus && !hasTrialStatus;
+  const isTrial = !isSuper && hasTrialStatus;
   const isPro = isSuper || plan === "pro" || plan === "premium";
   const isPremium = isSuper || plan === "premium";
 
@@ -278,6 +288,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         quota,
         plan,
         isActive,
+        isFree,
+        isTrial,
         isPro,
         isPremium,
         canAccess,

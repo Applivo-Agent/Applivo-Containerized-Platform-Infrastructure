@@ -16,10 +16,10 @@ function paymentStatusMeta(status: unknown): { label: string; className: string 
     return { label: "Failed", className: "text-red-400" };
   }
   if (normalized === "refunded") {
-    return { label: "Refunded", className: "text-amber-300" };
+    return { label: "Refunded", className: "text-white" };
   }
   if (normalized === "created" || normalized === "authorized" || normalized === "pending") {
-    return { label: "Not Paid", className: "text-amber-300" };
+    return { label: "Not Paid", className: "text-white" };
   }
   return { label: normalized ? normalized : "Unknown", className: "text-zinc-400" };
 }
@@ -144,6 +144,18 @@ export default function SubscriptionPage() {
     onError: () => alert("Failed to cancel. Contact support."),
   });
 
+  const startTrialMut = useMutation({
+    mutationFn: () => paymentsApi.startTrialWithAutopay({ plan: "starter" }),
+    onSuccess: (res) => {
+      const shortUrl = res.data?.short_url;
+      if (shortUrl) window.location.href = shortUrl;
+      else alert("Could not get payment link. Please try again.");
+    },
+    onError: (err: any) => {
+      alert(err.response?.data?.detail || "Failed to start trial. Please try again.");
+    },
+  });
+
   const handleCheckout = (planTier: PlanTier) => {
     if (currentPlan === planTier) return;
     createOrderMut.mutate(planTier);
@@ -167,9 +179,10 @@ export default function SubscriptionPage() {
   const latestPaymentMeta = paymentStatusMeta(latestPayment?.status);
 
   const trialDaysRemaining = sub?.trial_days_remaining ?? 0;
-  const isTrialExpired = sub?.status === "TRIAL_EXPIRED";
-  const isOnTrial = sub?.status === "TRIAL" && trialDaysRemaining > 0;
-  const noAutopay = sub?.status === "TRIAL" && !sub?.autopay_enabled;
+  const isTrialExpired = sub?.status === "trial_expired";
+  const isOnTrial = sub?.status === "trial" && trialDaysRemaining > 0;
+  const noAutopay = sub?.status === "trial" && !sub?.autopay_enabled;
+  const isPendingPayment = sub?.status === "pending";
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -182,6 +195,29 @@ export default function SubscriptionPage() {
           <p className="text-sm text-zinc-400 mt-1">Manage your Applivo billing loop and quotas</p>
         </div>
       </div>
+
+      {/* Pending payment — user started trial flow but didn't complete ₹5 card verification */}
+      {isPendingPayment && (
+        <div className="bg-blue-950/40 border border-blue-700/50 rounded-2xl p-4 md:p-5 shadow-lg">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold text-blue-100 flex items-center gap-2">
+                <span>⏳</span> Complete your trial setup
+              </p>
+              <p className="text-sm text-blue-200/80 mt-2">
+                You started the free trial flow but didn&apos;t complete the ₹5 card verification. Cancel and try again to complete the setup.
+              </p>
+            </div>
+            <button
+              onClick={handleCancel}
+              disabled={cancelMut.isPending}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition whitespace-nowrap disabled:opacity-50"
+            >
+              {cancelMut.isPending ? "..." : "Cancel & Retry"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Trial Banners */}
       {isOnTrial && (
@@ -282,7 +318,7 @@ export default function SubscriptionPage() {
           <div>
             <div className="flex items-center gap-2.5 mb-1.5">
               <h2 className="text-lg font-bold capitalize text-white">{sub.plan} Plan</h2>
-              <span className="px-2 py-0.5 bg-white text-black text-[9px] font-black rounded-full uppercase tracking-wider">Active</span>
+              <span className="px-2 py-0.5 bg-white text-black text-[9px] font-black rounded-full uppercase tracking-wider">{sub.status === "trial" ? "Trial" : "Active"}</span>
             </div>
             <p className="text-[12px] text-zinc-400 max-w-lg">
               Active until {sub.end_date ? formatDate(sub.end_date) : "the end of time"}. Quota: {quota?.limit || "unlimited"}/day.
@@ -322,8 +358,15 @@ export default function SubscriptionPage() {
                   <h3 className="font-bold text-base text-white">{p.label}</h3>
                   {p.tier === 'premium' && <Crown className="w-3.5 h-3.5 text-white" />}
                 </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[28px] font-black text-white tracking-tighter">{formatINRFromPaise(PLAN_PRICES[p.tier])}</span>
+                <div className="flex items-baseline gap-1.5">
+                  {p.tier === "starter" ? (
+                    <>
+                      <span className="text-[28px] font-black text-white tracking-tighter">₹0</span>
+                      <span className="text-zinc-500 line-through text-sm">{formatINRFromPaise(PLAN_PRICES[p.tier])}</span>
+                    </>
+                  ) : (
+                    <span className="text-[28px] font-black text-white tracking-tighter">{formatINRFromPaise(PLAN_PRICES[p.tier])}</span>
+                  )}
                   <span className="text-zinc-500 text-[9px] font-bold uppercase tracking-wider">/mo</span>
                 </div>
               </div>
@@ -345,14 +388,27 @@ export default function SubscriptionPage() {
               ))}
             </ul>
 
-            <button
-              onClick={() => handleCheckout(p.tier)}
-              disabled={currentPlan === p.tier || createOrderMut.isPending}
-              className={cn("w-full py-2.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-widest",
-                currentPlan === p.tier ? "bg-white/5 border border-white/10 text-zinc-600" : "bg-white text-black hover:bg-zinc-200 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
-              )}>
-              {createOrderMut.isPending ? "..." : currentPlan === p.tier ? "Current" : `Upgrade`}
-            </button>
+            {p.tier === "starter" && !isActive ? (
+              <div className="flex flex-col items-center gap-1.5">
+                <button
+                  onClick={() => startTrialMut.mutate()}
+                  disabled={startTrialMut.isPending}
+                  className="w-full py-2.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-widest bg-white text-black hover:bg-zinc-200 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  {startTrialMut.isPending ? "Starting..." : "Start 7-Day Free Trial"}
+                </button>
+                <p className="text-[10px] text-zinc-500">No charge for 7 days · ₹199/mo after trial</p>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleCheckout(p.tier)}
+                disabled={currentPlan === p.tier || createOrderMut.isPending}
+                className={cn("w-full py-2.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-widest",
+                  currentPlan === p.tier ? "bg-white/5 border border-white/10 text-zinc-600" : "bg-white text-black hover:bg-zinc-200 shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+                )}>
+                {createOrderMut.isPending ? "..." : currentPlan === p.tier ? isOnTrial ? "Trial Active" : "Current" : "Upgrade"}
+              </button>
+            )}
           </div>
         ))}
       </div>

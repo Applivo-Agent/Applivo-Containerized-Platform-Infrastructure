@@ -89,6 +89,8 @@ Job Summary: {analysis.ai_summary or job.description_clean[:500] if job.descript
             prompt = COVER_LETTER_PROMPT.format(tone=tone)
 
             try:
+                from app.services.ai_router import AIRouter
+                ai_settings = await AIRouter.load_user_ai_settings(user_id) if user_id else None
                 response = await ai_router.chat_completions_create(
                     model=settings.OPENAI_MODEL_HEAVY,
                     max_tokens=800,
@@ -100,6 +102,7 @@ Job Summary: {analysis.ai_summary or job.description_clean[:500] if job.descript
                     response_format={"type": "json_object"},
                     user_id=user_id,
                     endpoint="/api/cover-letters/generate",
+                    ai_settings=ai_settings,
                 )
                 data = json.loads(response["content"])
                 tokens_used = response.get("usage", {}).get("total_tokens", 0)

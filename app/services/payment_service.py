@@ -176,6 +176,17 @@ class PaymentService:
             logger.error("Razorpay subscription creation failed", error=str(e))
             raise RuntimeError(f"Failed to create Razorpay subscription: {str(e)}")
 
+    async def cancel_razorpay_subscription(self, razorpay_subscription_id: str) -> dict:
+        """Cancel a Razorpay subscription immediately."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self._base_url}/subscriptions/{razorpay_subscription_id}/cancel",
+                auth=self._razorpay_auth,
+                json={"cancel_at_cycle_end": 0},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def create_order(
         self,
         user_id: str,

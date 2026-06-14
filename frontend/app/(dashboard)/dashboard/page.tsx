@@ -33,6 +33,57 @@ function AnimatedNumber({ value, suffix = "" }: { value: number; suffix?: string
   return <span>{display.toLocaleString()}{suffix}</span>;
 }
 
+function ActionButton({
+  label,
+  activeLabel,
+  icon: Icon,
+  taskKey,
+  currentTask,
+  isWorking,
+  onClick,
+}: {
+  label: string;
+  activeLabel: string;
+  icon: React.ElementType;
+  taskKey: string;
+  currentTask: string | null;
+  isWorking: boolean;
+  onClick: () => void;
+}) {
+  const isActive = currentTask === taskKey;
+  const isDisabled = isWorking && !isActive;
+
+  return (
+    <motion.button
+      onClick={onClick}
+      disabled={isWorking}
+      whileTap={!isWorking ? { scale: 0.97 } : {}}
+      className={cn(
+        "relative flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all",
+        "border disabled:cursor-not-allowed",
+        isActive && [
+          "bg-[#222222] border-white/20 text-white",
+        ],
+        !isActive && !isDisabled && [
+          "bg-[#171717] hover:bg-[#222222] text-white border-[#262626]",
+        ],
+        isDisabled && [
+          "bg-[#171717]/60 text-zinc-500 border-[#262626]/50 opacity-50",
+        ]
+      )}
+    >
+      <span className="flex items-center gap-2">
+        {isActive ? (
+          <Loader2 className="w-4 h-4 animate-spin text-white" />
+        ) : (
+          <Icon className={cn("w-4 h-4", isDisabled ? "text-zinc-600" : "text-zinc-400")} />
+        )}
+        {isActive ? activeLabel : label}
+      </span>
+    </motion.button>
+  );
+}
+
 function StatCard({ icon: Icon, label, value, sub, color, delay = 0, isLocked = false }: { icon: any; label: string; value: any; sub?: string; color?: string; delay?: number; isLocked?: boolean }) {
   return (
     <motion.div
@@ -308,50 +359,42 @@ export default function DashboardPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
           <h2 className="text-xl font-bold tracking-tight text-white/90 hidden md:block">System Overview</h2>
           <div className="flex flex-wrap items-center justify-end gap-3 w-full md:w-auto">
-            <button
+            <ActionButton
+              label="Scrape"
+              activeLabel="Scraping…"
+              icon={Play}
+              taskKey="scrape_jobs"
+              currentTask={currentTask}
+              isWorking={isWorking}
               onClick={handleScrapeJobs}
-              disabled={isWorking}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-            >
-              {isWorking && currentTask === "scrape_jobs" ? (
-                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Scraping...</>
-              ) : (
-                <><Play className="w-4 h-4 text-zinc-400" /> Scrape</>
-              )}
-            </button>
-            <button
+            />
+            <ActionButton
+              label="Analyze"
+              activeLabel="Analyzing…"
+              icon={Zap}
+              taskKey="analyze_jobs"
+              currentTask={currentTask}
+              isWorking={isWorking}
               onClick={handleAnalyzeJobs}
-              disabled={isWorking}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-            >
-              {isWorking && currentTask === "analyze_jobs" ? (
-                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Analyzing...</>
-              ) : (
-                <><Zap className="w-4 h-4 text-zinc-400 fill-zinc-400" /> Analyze</>
-              )}
-            </button>
-            <button
+            />
+            <ActionButton
+              label="Queue"
+              activeLabel="Queueing…"
+              icon={Activity}
+              taskKey="queue_jobs"
+              currentTask={currentTask}
+              isWorking={isWorking}
               onClick={handleQueueJobs}
-              disabled={isWorking}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#171717] hover:bg-[#222222] text-white rounded-xl text-sm font-medium transition-colors border border-[#262626] disabled:opacity-50"
-            >
-              {isWorking && currentTask === "queue_jobs" ? (
-                <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Queueing...</>
-              ) : (
-                <><Activity className="w-4 h-4 text-zinc-400" /> Queue</>
-              )}
-            </button>
-            <button
+            />
+            <ActionButton
+              label="Deploy"
+              activeLabel="Deploying…"
+              icon={Send}
+              taskKey="apply_queued"
+              currentTask={currentTask}
+              isWorking={isWorking}
               onClick={handleApplyQueued}
-              disabled={isWorking}
-              className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e] hover:bg-[#2a2a2a] text-sm font-medium text-white transition-all rounded-lg border border-[#2a2a2a]"
-            >
-              {isWorking && (currentTask === "apply_queued" || currentTask === "apply_jobs") ? (
-                <><RefreshCw className="w-4 h-4 animate-spin" /> Deploying...</>
-              ) : (
-                <><Send className="w-4 h-4" /> Deploy</>
-              )}
-            </button>
+            />
           </div>
         </div>
       )}
@@ -474,12 +517,19 @@ export default function DashboardPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="rounded-2xl p-8 border border-white/10 bg-gradient-to-br from-[#1a1a1a] to-[#0d0d0d] text-center"
+          className="flex items-center justify-between gap-4 p-5 rounded-2xl border border-white/10 bg-[#111]"
         >
-          <h3 className="text-xl font-bold text-white mb-3">Unlock Automation Features</h3>
-          <p className="text-zinc-400 mb-6 max-w-sm">Upgrade to a paid plan to access job scraping, analysis, auto-apply, and advanced automation features.</p>
-          <Link href="/subscription" className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-            <Crown className="w-4 h-4" /> Upgrade Now
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+              <Crown className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold text-white">Start your free 7-day trial</p>
+              <p className="text-[12px] text-zinc-500">Access automation, AI analysis, auto-apply, and more</p>
+            </div>
+          </div>
+          <Link href="/subscription" className="shrink-0 px-5 py-2 bg-white text-black text-[13px] font-bold rounded-xl hover:bg-zinc-200 transition-colors">
+            Start Free Trial
           </Link>
         </motion.div>
       )}

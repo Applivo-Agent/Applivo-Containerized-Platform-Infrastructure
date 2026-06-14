@@ -92,7 +92,7 @@ class CookieService:
 
     async def get_cookies(
         self, user_id: str, platform: str,
-    ) -> Union[Optional[dict, list]]:
+    ) -> Optional[Union[dict, list]]:
         """Decrypt and return platform cookies for a user."""
         async with get_db_context() as db:
             result = await db.execute(

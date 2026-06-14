@@ -489,9 +489,10 @@ function DevelopersContactSection() {
 
 /* ─── MAIN PAGE ───────────────────────────────────────────── */
 export default function LandingPage() {
-  const isLoggedIn = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return Boolean(localStorage.getItem("applivo_token"));
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    setIsLoggedIn(Boolean(localStorage.getItem("applivo_token")));
   }, []);
 
   return (

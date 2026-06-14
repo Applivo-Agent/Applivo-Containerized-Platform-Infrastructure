@@ -502,8 +502,6 @@ export default function ProfilePage() {
             { id: "experience", label: "Experience", icon: Briefcase },
             { id: "education", label: "Education", icon: GraduationCap },
             { id: "skills", label: "Skills", icon: Code },
-            { id: "preferences", label: "Preferences", icon: Target },
-            { id: "automation", label: "Automation", icon: Zap },
           ].map(t => (
             <button 
               key={t.id} 

@@ -43,3 +43,4 @@ celerybeat-schedule
 # Docker volumes
 postgres-data/
 redis-data/
+.env.development

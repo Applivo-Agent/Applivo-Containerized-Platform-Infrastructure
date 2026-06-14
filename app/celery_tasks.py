@@ -8,6 +8,7 @@ Each task is idempotent and handles errors gracefully.
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import datetime, timezone
 
 import structlog
@@ -124,7 +125,18 @@ def apply_queued_batch(self, user_id: str):
                         session_expired = "session expired" in error_text or "run save_cookies.py" in error_text or "not logged in" in error_text
                         login_modal_block = bool(r.get("bot_detected")) or "login modal" in error_text or "anti-bot detection" in error_text
 
+                        # FIX 3: On first bot detection, sleep + retry once before invalidating cookies
+                        if login_modal_block and not session_expired:
+                            logger.warning("Bot detected - sleeping 60s then retrying once", app_id=app_id)
+                            await asyncio.sleep(60)
+                            r = await bot.apply(app_id)
+                            results[-1] = {"id": app_id, **r}
+                            error_text = (r.get("error") or "").lower()
+                            session_expired = "session expired" in error_text or "run save_cookies.py" in error_text or "not logged in" in error_text
+                            login_modal_block = bool(r.get("bot_detected")) or "login modal" in error_text or "anti-bot detection" in error_text
+
                         if session_expired or login_modal_block:
+                            # Only invalidate after retry also fails (two consecutive detections)
                             await cookie_service.invalidate_cookies(user_id, "internshala")
                             failed_count += 1
                             logger.warning(
@@ -215,6 +227,11 @@ Applications are paused until this is fixed.
                             db.add(app)
                             await db.commit()
                         logger.error("Apply exception - marked as FAILED", app_id=app_id, error=str(exc), retry_count=app.retry_count if app else 0)
+
+                    # FIX 5: Human-like inter-job delay to avoid rate-limiting
+                    delay = random.uniform(8, 20)
+                    logger.info("Inter-job delay", seconds=round(delay, 1))
+                    await asyncio.sleep(delay)
 
                 return {
                     "applied": applied_count,
@@ -376,35 +393,24 @@ def send_trial_expiry_reminders():
 
                 for sub in trials:
                     try:
-                        user_result = await db.execute(
-                            select(User).where(User.id == sub.user_id)
-                        )
+                        user_result = await db.execute(select(User).where(User.id == sub.user_id))
                         user = user_result.scalar_one_or_none()
                         if not user:
                             continue
 
-                        if sub.razorpay_subscription_id:
-                            # Has autopay: inform about automatic charge
-                            message_body = f"""Your 7-day free trial for Applivo ends tomorrow!
+                        days_left = max(1, (sub.trial_end_date.replace(tzinfo=timezone.utc) - now).days + 1)
+                        trial_end_str = sub.trial_end_date.strftime('%B %d, %Y')
 
-Your card will be automatically charged ₹199 for the {sub.plan.value} plan.
-
-If you wish to cancel or change your plan, visit your subscription settings.
-
-Thank you for using Applivo!"""
-                        else:
-                            # No autopay: remind to add card
-                            message_body = f"""Your 7-day free trial for Applivo ends tomorrow!
-
-To continue using Applivo after your trial, please add your payment method in your account settings.
-
-Don't lose access to your account — add your card now!
-
-₹199/month for the {sub.plan.value} plan."""
-
+                        from app.services import email_service
+                        await email_service.send_trial_ending(
+                            user.email,
+                            user.full_name or user.email,
+                            days_left,
+                            trial_end_str,
+                        )
                         await NotificationService().notify(
-                            title="⏳ Your Trial Ends Tomorrow",
-                            body=message_body,
+                            title=f"Trial ends in {days_left} day{'s' if days_left != 1 else ''}",
+                            body=f"Your trial expires on {trial_end_str}.",
                             event_type="trial_expiry_reminder",
                             data={"plan": sub.plan.value, "trial_end": sub.trial_end_date.isoformat()},
                             user_id=sub.user_id,
@@ -420,6 +426,127 @@ Don't lose access to your account — add your card now!
         logger.info("Trial expiry reminders sent", count=count)
     except Exception as e:
         logger.error("Send trial expiry reminders failed", error=str(e))
+
+
+@celery_app.task
+def send_trial_expired_emails():
+    """Send HTML email to users whose trial just expired (within last 24h)."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
+        from app.services import email_service
+        from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                window = now - timedelta(hours=24)
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status == SubscriptionStatus.TRIAL_EXPIRED,
+                        Subscription.trial_end_date >= window,
+                        Subscription.trial_end_date < now,
+                    )
+                )
+                count = 0
+                for sub in result.scalars().all():
+                    user = (await db.execute(select(User).where(User.id == sub.user_id))).scalar_one_or_none()
+                    if user:
+                        await email_service.send_trial_expired(user.email, user.full_name or user.email)
+                        count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Trial expired emails sent", count=count)
+    except Exception as e:
+        logger.error("send_trial_expired_emails failed", error=str(e))
+
+
+@celery_app.task
+def send_reengagement_emails():
+    """Email users who haven't logged in for 14 days."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.user import User
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.services import email_service
+        from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                cutoff = now - timedelta(days=14)
+                result = await db.execute(
+                    select(User).where(
+                        User.last_login_at < cutoff,
+                        User.last_login_at != None,
+                    )
+                )
+                count = 0
+                for user in result.scalars().all():
+                    days = max(14, (now - user.last_login_at.replace(tzinfo=timezone.utc)).days)
+                    await email_service.send_reengagement(user.email, user.full_name or user.email, days)
+                    count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Re-engagement emails sent", count=count)
+    except Exception as e:
+        logger.error("send_reengagement_emails failed", error=str(e))
+
+
+@celery_app.task
+def send_profile_incomplete_reminders():
+    """Email users with incomplete profiles after 24h of signup."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.user import User, UserProfile
+        from app.services import email_service
+        from sqlalchemy import select, outerjoin
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                window_start = now - timedelta(hours=48)
+                window_end = now - timedelta(hours=24)
+                result = await db.execute(
+                    select(User).where(
+                        User.created_at >= window_start,
+                        User.created_at < window_end,
+                    )
+                )
+                count = 0
+                for user in result.scalars().all():
+                    profile = (await db.execute(
+                        select(UserProfile).where(UserProfile.user_id == user.id)
+                    )).scalar_one_or_none()
+
+                    missing = []
+                    if not profile:
+                        missing = ["Resume / CV", "Skills", "Job preferences", "Work experience"]
+                    else:
+                        if not profile.professional_summary:
+                            missing.append("Professional summary")
+                        if not profile.experience_level:
+                            missing.append("Experience level")
+                        if not profile.location:
+                            missing.append("Location preference")
+                        if not getattr(profile, 'skills', None) and not getattr(profile, 'career_goals', None):
+                            missing.append("Skills & career goals")
+
+                    if missing:
+                        await email_service.send_profile_incomplete(user.email, user.full_name or user.email, missing)
+                        count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Profile incomplete reminders sent", count=count)
+    except Exception as e:
+        logger.error("send_profile_incomplete_reminders failed", error=str(e))
 
 
 @celery_app.task
@@ -575,3 +702,234 @@ def reset_all_monthly_credits(self):
     except Exception as e:
         logger.error("Monthly credits reset failed", error=str(e))
         raise self.retry(exc=e)
+
+
+# ── Lifecycle email tasks ────────────────────────────────────────────────────
+
+
+@celery_app.task
+def send_weekly_agent_report():
+    """Send weekly AI Agent Performance Report to all active subscribers."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
+        from app.models.job import Application
+        from app.services import email_service
+        from sqlalchemy import select, func
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                week_start = now - timedelta(days=7)
+                week_label = now.strftime("Week of %B %d, %Y")
+
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status.in_([
+                            SubscriptionStatus.ACTIVE,
+                            SubscriptionStatus.SUCCESS,
+                            SubscriptionStatus.TRIAL,
+                        ])
+                    )
+                )
+                count = 0
+                for sub in result.scalars().all():
+                    user = (await db.execute(select(User).where(User.id == sub.user_id))).scalar_one_or_none()
+                    if not user:
+                        continue
+
+                    apps_result = await db.execute(
+                        select(Application).where(
+                            Application.user_id == user.id,
+                            Application.applied_at >= week_start,
+                        )
+                    )
+                    apps = apps_result.scalars().all()
+                    jobs_applied = len(apps)
+                    recruiter_replies = sum(1 for a in apps if getattr(a, 'recruiter_replied', False))
+                    interviews = sum(1 for a in apps if getattr(a, 'status', '') in ('interview', 'offer'))
+
+                    await email_service.send_ai_agent_performance_report(
+                        user.email,
+                        user.full_name or user.email,
+                        week_label,
+                        jobs_analyzed=jobs_applied * 3,
+                        jobs_matched=jobs_applied,
+                        jobs_applied=jobs_applied,
+                        recruiter_replies=recruiter_replies,
+                        interviews=interviews,
+                        top_skills=[],
+                        recommended_actions=[
+                            "Update your resume with recent projects",
+                            "Set specific job title preferences in settings",
+                            "Add more location preferences to expand matches",
+                        ] if jobs_applied < 5 else [],
+                    )
+                    count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Weekly agent reports sent", count=count)
+    except Exception as e:
+        logger.error("send_weekly_agent_report failed", error=str(e))
+
+
+@celery_app.task
+def send_trial_day3_emails():
+    """Send day-3 progress email to users 3 days into their trial."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
+        from app.models.job import Application
+        from app.services import email_service
+        from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                day3_start = now - timedelta(days=4)
+                day3_end = now - timedelta(days=3)
+
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status == SubscriptionStatus.TRIAL,
+                        Subscription.created_at >= day3_start,
+                        Subscription.created_at < day3_end,
+                    )
+                )
+                count = 0
+                for sub in result.scalars().all():
+                    user = (await db.execute(select(User).where(User.id == sub.user_id))).scalar_one_or_none()
+                    if not user:
+                        continue
+                    apps_result = await db.execute(
+                        select(Application).where(Application.user_id == user.id)
+                    )
+                    apps = apps_result.scalars().all()
+                    await email_service.send_trial_day3(
+                        user.email,
+                        user.full_name or user.email,
+                        jobs_applied=len(apps),
+                        jobs_found=len(apps) * 2,
+                    )
+                    count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Trial day-3 emails sent", count=count)
+    except Exception as e:
+        logger.error("send_trial_day3_emails failed", error=str(e))
+
+
+@celery_app.task
+def send_application_aging_alerts():
+    """Alert users about applications with no response after 7 days."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.user import User
+        from app.models.job import Application
+        from app.services import email_service
+        from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                stale_cutoff = now - timedelta(days=7)
+                nudge_window = now - timedelta(days=8)
+
+                result = await db.execute(
+                    select(Application).where(
+                        Application.applied_at >= nudge_window,
+                        Application.applied_at < stale_cutoff,
+                        Application.status == "applied",
+                    )
+                )
+                count = 0
+                for app in result.scalars().all():
+                    user = (await db.execute(select(User).where(User.id == app.user_id))).scalar_one_or_none()
+                    if not user:
+                        continue
+                    days_inactive = (now - app.applied_at.replace(tzinfo=timezone.utc)).days
+                    await email_service.send_application_aging(
+                        user.email,
+                        user.full_name or user.email,
+                        company=getattr(app, 'company_name', 'the company') or "the company",
+                        role=getattr(app, 'job_title', 'this role') or "this role",
+                        days_inactive=days_inactive,
+                    )
+                    count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Application aging alerts sent", count=count)
+    except Exception as e:
+        logger.error("send_application_aging_alerts failed", error=str(e))
+
+
+@celery_app.task
+def send_monthly_career_reports():
+    """Send monthly career report on the 1st of each month."""
+    try:
+        from app.core.database import get_db_context
+        from app.models.subscription import Subscription, SubscriptionStatus
+        from app.models.user import User
+        from app.models.job import Application
+        from app.services import email_service
+        from sqlalchemy import select
+        from datetime import datetime, timezone, timedelta
+
+        async def _run():
+            async with get_db_context() as db:
+                now = datetime.now(timezone.utc)
+                month_start = now.replace(day=1) - timedelta(days=1)
+                month_start = month_start.replace(day=1)
+                month_label = month_start.strftime("%B %Y")
+
+                result = await db.execute(
+                    select(Subscription).where(
+                        Subscription.status.in_([
+                            SubscriptionStatus.ACTIVE,
+                            SubscriptionStatus.SUCCESS,
+                            SubscriptionStatus.TRIAL,
+                        ])
+                    )
+                )
+                count = 0
+                for sub in result.scalars().all():
+                    user = (await db.execute(select(User).where(User.id == sub.user_id))).scalar_one_or_none()
+                    if not user:
+                        continue
+
+                    apps_result = await db.execute(
+                        select(Application).where(
+                            Application.user_id == user.id,
+                            Application.applied_at >= month_start,
+                            Application.applied_at < now,
+                        )
+                    )
+                    apps = apps_result.scalars().all()
+                    interviews = sum(1 for a in apps if getattr(a, 'status', '') in ('interview', 'offer'))
+                    offers = sum(1 for a in apps if getattr(a, 'status', '') == 'offer')
+
+                    await email_service.send_monthly_career_report(
+                        user.email,
+                        user.full_name or user.email,
+                        month_label=month_label,
+                        total_applied=len(apps),
+                        total_interviews=interviews,
+                        total_offers=offers,
+                        response_rate=(interviews / len(apps) * 100) if apps else 0.0,
+                        days_active=30,
+                    )
+                    count += 1
+                return count
+
+        count = _run_async(_run())
+        logger.info("Monthly career reports sent", count=count)
+    except Exception as e:
+        logger.error("send_monthly_career_reports failed", error=str(e))

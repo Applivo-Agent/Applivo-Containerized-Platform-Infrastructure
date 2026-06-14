@@ -117,6 +117,9 @@ class SubscriptionService:
         Create a 7-day free trial subscription for a new user.
         Returns None if user has already had a trial before.
         """
+        raise NotImplementedError(
+            "Direct trial creation is disabled. Use POST /payments/start-trial-with-autopay instead."
+        )
         async with get_db_context() as db:
             # Check if user has ever had a trial
             result = await db.execute(

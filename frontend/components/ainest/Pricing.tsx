@@ -13,6 +13,7 @@ const plans = [
     description: "Perfect for students & fresh job seekers",
     monthlyPrice: 199,
     yearlyPrice: 159,
+    trialFree: true,
     highlight: false,
     badge: null,
     color: "slate",
@@ -37,8 +38,9 @@ const plans = [
     description: "For serious job hunters who want every edge",
     monthlyPrice: 399,
     yearlyPrice: 319,
+    trialFree: false,
     highlight: true,
-    badge: "Most Popular",
+    badge: "Popular",
     color: "white",
     features: [
       "100 daily applications",
@@ -63,6 +65,7 @@ const plans = [
     description: "Maximum power for executives & professionals",
     monthlyPrice: 599,
     yearlyPrice: 479,
+    trialFree: false,
     highlight: false,
     badge: null,
     color: "zinc",
@@ -81,32 +84,97 @@ const plans = [
   },
 ];
 
-const colorMap: Record<string, { glow: string; ring: string; badge: string; icon: string; check: string; btn: string }> = {
-  slate: {
-    glow: "rgba(255,255,255,0.03)",
-    ring: "hover:border-white/10",
-    badge: "bg-white/10 text-zinc-400 border-white/10",
-    icon: "bg-white/10 border-white/10 text-zinc-400",
-    check: "bg-white/10 border-white/10 text-zinc-400",
-    btn: "bg-white text-black hover:bg-zinc-200 shadow-xl",
+type CellValue = boolean | string;
+
+const compareRows: {
+  section: string;
+  rows: { label: string; starter: CellValue; pro: CellValue; premium: CellValue }[];
+}[] = [
+  {
+    section: "Applications",
+    rows: [
+      { label: "Daily applications", starter: "50", pro: "100", premium: "150" },
+      { label: "Internshala scraping", starter: true, pro: true, premium: true },
+      { label: "Auto-apply bot", starter: true, pro: true, premium: true },
+      { label: "Application tracking (Kanban)", starter: true, pro: true, premium: true },
+      { label: "Priority queue processing", starter: false, pro: true, premium: true },
+      { label: "Highest priority queue", starter: false, pro: false, premium: true },
+    ],
   },
-  white: {
-    glow: "rgba(255,255,255,0.05)",
-    ring: "border-[#ffffff]/30",
-    badge: "bg-white/15 text-white border-[#ffffff]/25",
-    icon: "bg-white/15 border-[#ffffff]/30 text-white",
-    check: "bg-white/10 border-[#ffffff]/25 text-white",
-    btn: "bg-white hover:bg-zinc-100 text-black",
+  {
+    section: "AI & Analysis",
+    rows: [
+      { label: "AI analyze budget / run", starter: "25k tokens", pro: "60k tokens", premium: "120k tokens" },
+      { label: "AI analyze budget / month", starter: "120k tokens", pro: "600k tokens", premium: "Unlimited" },
+      { label: "AI match scoring", starter: true, pro: true, premium: true },
+      { label: "Advanced AI analysis", starter: false, pro: true, premium: true },
+      { label: "Skill gap analysis", starter: false, pro: true, premium: true },
+      { label: "Market insights & salary data", starter: false, pro: false, premium: true },
+    ],
   },
-  zinc: {
-    glow: "rgba(255,255,255,0.03)",
-    ring: "hover:border-white/10",
-    badge: "bg-white/10 text-zinc-400 border-white/10",
-    icon: "bg-white/10 border-white/10 text-zinc-400",
-    check: "bg-white/10 border-white/10 text-zinc-400",
-    btn: "bg-white text-black hover:bg-zinc-200 shadow-xl",
+  {
+    section: "Resume & Career",
+    rows: [
+      { label: "Resume upload & management", starter: true, pro: true, premium: true },
+      { label: "Cover letter generator", starter: false, pro: true, premium: true },
+      { label: "Interview tracking & prep", starter: false, pro: true, premium: true },
+      { label: "Resume performance ranking", starter: false, pro: false, premium: true },
+      { label: "Interview conversion funnel", starter: false, pro: false, premium: true },
+    ],
   },
-};
+  {
+    section: "Notifications & Automation",
+    rows: [
+      { label: "Email notifications", starter: true, pro: true, premium: true },
+      { label: "Telegram notifications", starter: false, pro: true, premium: true },
+      { label: "Email inbox monitoring (IMAP)", starter: false, pro: true, premium: true },
+      { label: "7-day follow-up automation", starter: false, pro: true, premium: true },
+    ],
+  },
+  {
+    section: "Analytics",
+    rows: [
+      { label: "Basic analytics", starter: true, pro: true, premium: true },
+      { label: "Advanced analytics dashboard", starter: false, pro: true, premium: true },
+      { label: "Market insights & salary data", starter: false, pro: false, premium: true },
+    ],
+  },
+  {
+    section: "AI Chat Assistant",
+    rows: [
+      { label: "Messages per month", starter: "50", pro: "100", premium: "150" },
+    ],
+  },
+  {
+    section: "Support",
+    rows: [
+      { label: "Email support", starter: "Basic", pro: "Priority", premium: "Priority" },
+      { label: "Dedicated support", starter: false, pro: false, premium: true },
+    ],
+  },
+];
+
+function Cell({ value, highlight }: { value: CellValue; highlight?: boolean }) {
+  if (typeof value === "boolean") {
+    return value ? (
+      <div className="flex justify-center">
+        <Check
+          className={`w-[18px] h-[18px] ${highlight ? "text-white" : "text-zinc-400"}`}
+          strokeWidth={2.5}
+        />
+      </div>
+    ) : (
+      <div className="flex justify-center">
+        <span className="text-[#2a2a2a] text-[20px] leading-none font-light">—</span>
+      </div>
+    );
+  }
+  return (
+    <span className={`text-[13px] text-center block font-medium ${highlight ? "text-white" : "text-zinc-400"}`}>
+      {value}
+    </span>
+  );
+}
 
 export function SimplePricing() {
   const [yearly, setYearly] = useState(false);
@@ -135,36 +203,11 @@ export function SimplePricing() {
         </p>
       </motion.div>
 
-      {/* Monthly / Yearly Toggle */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-        className="flex items-center gap-2 p-1.5 bg-[#111] rounded-full border border-[#1e1e1e] mb-14"
-      >
-        <button
-          onClick={() => setYearly(false)}
-          className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${!yearly ? "bg-white text-black shadow-sm" : "text-[#555] hover:text-white"}`}
-        >
-          Monthly
-        </button>
-        <button
-          onClick={() => setYearly(true)}
-          className={`px-6 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${yearly ? "bg-white text-black shadow-sm" : "text-[#555] hover:text-white"}`}
-        >
-          Yearly
-          <span className="bg-white/15 text-white text-[10px] px-2 py-0.5 rounded-full border border-[#ffffff]/25 font-semibold">
-            Save 20%
-          </span>
-        </button>
-      </motion.div>
-
       {/* Pricing Cards */}
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-5">
         {plans.map((plan, i) => {
-          const c = colorMap[plan.color];
           const price = yearly ? plan.yearlyPrice : plan.monthlyPrice;
+          const isHighlight = plan.highlight;
 
           return (
             <motion.div
@@ -173,83 +216,248 @@ export function SimplePricing() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: i * 0.08 }}
-              className={`relative rounded-2xl bg-[#1c1c1e] border border-[#262626] overflow-hidden flex flex-col transition-all duration-300 ${plan.highlight
-                ? "shadow-[0_0_60px_-10px_rgba(255,255,255,0.1)] scale-[1.02] border-white/20"
-                : `hover:border-white/10`
-                }`}
+              className={`relative rounded-2xl bg-[#111] border overflow-hidden flex flex-col transition-all duration-300 ${
+                isHighlight
+                  ? "border-white/20 shadow-[0_0_60px_-10px_rgba(255,255,255,0.1)] scale-[1.02]"
+                  : "border-[#1e1e1e] hover:border-[#2a2a2a]"
+              }`}
             >
-              {/* Glow */}
-              <div
-                className="absolute top-0 right-0 w-48 h-48 rounded-full opacity-60 blur-[80px] pointer-events-none"
-                style={{ background: c.glow }}
-              />
-
-              {/* Popular badge */}
               {plan.badge && (
                 <div className="absolute top-4 right-4">
-                  <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${c.badge}`}>
+                  <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/10 text-white border border-white/15">
                     {plan.badge}
                   </span>
                 </div>
               )}
-
               <div className="relative z-10 p-7 flex flex-col flex-1">
-
-                {/* Plan name + icon */}
                 <div className="flex items-center gap-2.5 mb-1">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center border ${c.icon}`}>
-                    {plan.icon}
+                  <span className="text-white font-semibold text-[17px]">{plan.name}</span>
+                </div>
+                <p className="text-[#555] text-[13px] mb-6 leading-relaxed">{plan.description}</p>
+
+                {plan.trialFree ? (
+                  <div className="mb-6">
+                    <div className="flex items-end gap-2">
+                      <span className="text-[46px] font-bold text-white leading-none tracking-tight">Free</span>
+                      <span className="text-[#444] line-through text-[16px] mb-1.5">₹{price}/mo</span>
+                    </div>
+                    <p className="text-[11px] text-[#555] mt-1.5">7-day free trial · then ₹{price}/mo</p>
                   </div>
-                  <span className="text-white font-semibold text-[16px]">{plan.name}</span>
-                </div>
-                <p className="text-[#555] text-[13px] mb-7 leading-relaxed">{plan.description}</p>
-
-                {/* Price */}
-                <div className="flex items-end gap-1 mb-1">
-                  <span className="text-[13px] text-[#555] font-medium">₹</span>
-                  <motion.span
-                    key={price}
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25 }}
-                    className="text-[44px] font-bold text-white leading-none tracking-tight"
-                  >
-                    {price}
-                  </motion.span>
-                  <span className="text-[#444] text-[13px] mb-1">/ month</span>
-                </div>
-                {yearly && (
-                  <p className="text-[11px] text-[#555] mb-7">Billed ₹{price * 12}/year</p>
+                ) : (
+                  <div className="mb-6">
+                    <div className="flex items-end gap-1">
+                      <span className="text-[13px] text-[#555] mb-2">₹</span>
+                      <span className="text-[46px] font-bold text-white leading-none tracking-tight">{price}</span>
+                      <span className="text-[#444] text-[13px] mb-1.5">/mo</span>
+                    </div>
+                    {yearly && <p className="text-[11px] text-[#555] mt-1.5">Billed ₹{price * 12}/year</p>}
+                  </div>
                 )}
-                {!yearly && <div className="mb-7" />}
 
-                {/* Divider */}
-                <div className="h-[1px] bg-[#1a1a1a] mb-6" />
+                <div className="h-px bg-[#1a1a1a] mb-5" />
 
-                {/* Features */}
                 <div className="space-y-3 flex-1">
                   {plan.features.map((feat, fi) => (
                     <div key={fi} className="flex items-start gap-3">
-                      <div className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center border shrink-0 ${c.check}`}>
-                        <Check className="w-2.5 h-2.5" strokeWidth={3} />
-                      </div>
-                      <span className="text-[#888] text-[13px] leading-relaxed">{feat}</span>
+                      <Check className={`mt-0.5 w-3.5 h-3.5 shrink-0 ${isHighlight ? "text-white" : "text-zinc-500"}`} strokeWidth={3} />
+                      <span className="text-[#777] text-[13px] leading-relaxed">{feat}</span>
                     </div>
                   ))}
                 </div>
 
-                {/* CTA */}
-                <Link
-                  href={isLoggedIn ? "/subscription" : "/register"}
-                  className={`mt-8 block w-full text-center py-3 rounded-xl text-[14px] font-semibold transition-all ${c.btn}`}
-                >
-                  Get started
-                </Link>
+                {plan.trialFree ? (
+                  <div className="mt-8 flex flex-col items-center gap-1.5">
+                    <Link
+                      href={isLoggedIn ? "/subscription" : "/register"}
+                      className="block w-full text-center py-3 rounded-xl text-[14px] font-semibold transition-all bg-white text-black hover:bg-zinc-100"
+                    >
+                      Start 7-Day Free Trial
+                    </Link>
+                    <p className="text-[11px] text-[#444]">No charge for 7 days · ₹{price}/mo after</p>
+                  </div>
+                ) : (
+                  <Link
+                    href={isLoggedIn ? "/subscription" : "/register"}
+                    className={`mt-8 block w-full text-center py-3 rounded-xl text-[14px] font-semibold transition-all ${
+                      isHighlight
+                        ? "bg-white text-black hover:bg-zinc-100"
+                        : "bg-[#1a1a1a] text-white border border-[#2a2a2a] hover:border-white/20"
+                    }`}
+                  >
+                    Get started
+                  </Link>
+                )}
               </div>
             </motion.div>
           );
         })}
       </div>
+
+      {/* Toggle */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.4 }}
+        className="flex items-center gap-3 mt-10 mb-20"
+      >
+        <span className={`text-[14px] font-medium transition-colors ${!yearly ? "text-white" : "text-[#555]"}`}>Monthly</span>
+        <button
+          onClick={() => setYearly((v) => !v)}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${yearly ? "bg-white" : "bg-[#2a2a2a]"}`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full transition-transform duration-200 ${
+              yearly ? "translate-x-5 bg-black" : "translate-x-0 bg-[#666]"
+            }`}
+          />
+        </button>
+        <div className="flex items-center gap-2">
+          <span className={`text-[14px] font-medium transition-colors ${yearly ? "text-white" : "text-[#555]"}`}>Yearly</span>
+          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+            SAVE 20%
+          </span>
+        </div>
+      </motion.div>
+
+      {/* Compare Plans Table */}
+      <motion.div
+        initial={{ opacity: 0, y: 32 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.6 }}
+        className="w-full max-w-5xl"
+      >
+        <h3 className="text-[32px] font-bold text-white text-center mb-2">Compare Plans</h3>
+        <p className="text-[#555] text-[15px] text-center mb-10">
+          Everything you need to automate your job search, compared side by side.
+        </p>
+
+        <div className="border border-[#1e1e1e] rounded-2xl overflow-hidden">
+
+          {/* Sticky plan header */}
+          <div className="sticky top-0 z-20 bg-[#0d0d0d] border-b border-[#1e1e1e]" style={{ display: "grid", gridTemplateColumns: "35% 1fr 1fr 1fr" }}>
+
+            {/* Toggle cell */}
+            <div className="p-6 flex flex-col justify-center gap-2">
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setYearly((v) => !v)}
+                  className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 flex-shrink-0 ${yearly ? "bg-white" : "bg-[#2a2a2a]"}`}
+                >
+                  <span
+                    className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full transition-transform duration-200 ${
+                      yearly ? "translate-x-[18px] bg-black" : "translate-x-0 bg-[#666]"
+                    }`}
+                  />
+                </button>
+                <span className={`text-[14px] font-medium ${yearly ? "text-white" : "text-[#555]"}`}>Yearly</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                  SAVE 20%
+                </span>
+              </div>
+            </div>
+
+            {plans.map((p) => {
+              const price = yearly ? p.yearlyPrice : p.monthlyPrice;
+              return (
+                <div
+                  key={p.tier}
+                  className={`p-6 border-l border-[#1e1e1e] ${p.highlight ? "bg-white/[0.025]" : ""}`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-white font-bold text-[20px]">{p.name}</span>
+                    {p.badge && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/15 text-white border border-white/20">
+                        {p.badge}
+                      </span>
+                    )}
+                  </div>
+                  {p.trialFree ? (
+                    <div className="flex items-baseline gap-2 mb-4">
+                      <span className="text-white font-bold text-[26px]">Free</span>
+                      <span className="text-[#3a3a3a] line-through text-[13px]">₹{price}/mo</span>
+                    </div>
+                  ) : (
+                    <div className="mb-4">
+                      <span className="text-white font-bold text-[26px]">₹{price}</span>
+                      <span className="text-[#555] text-[13px]"> /month</span>
+                    </div>
+                  )}
+                  <Link
+                    href={isLoggedIn ? "/subscription" : "/register"}
+                    className={`block w-full text-center py-2.5 rounded-lg text-[13px] font-semibold transition-all ${
+                      p.highlight
+                        ? "bg-white text-black hover:bg-zinc-100"
+                        : "bg-[#1a1a1a] text-white border border-[#2a2a2a] hover:border-white/25"
+                    }`}
+                  >
+                    {p.trialFree ? "Start free trial" : "Get started"}
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Feature sections */}
+          {compareRows.map((section, si) => (
+            <div key={si}>
+              {/* Section label */}
+              <div className="px-6 py-3 bg-[#0a0a0a] border-t border-[#1a1a1a]">
+                <span className="text-[11px] text-[#3a3a3a] uppercase tracking-[0.18em] font-semibold">
+                  {section.section}
+                </span>
+              </div>
+
+              {/* Feature rows */}
+              {section.rows.map((row, ri) => (
+                <div
+                  key={ri}
+                  className="border-t border-[#141414] hover:bg-white/[0.012] transition-colors"
+                  style={{ display: "grid", gridTemplateColumns: "35% 1fr 1fr 1fr" }}
+                >
+                  <div className="px-6 py-4 text-[#888] text-[13px] flex items-center">{row.label}</div>
+                  {([row.starter, row.pro, row.premium] as CellValue[]).map((val, ci) => (
+                    <div
+                      key={ci}
+                      className={`px-6 py-4 flex items-center justify-center border-l border-[#141414] ${
+                        plans[ci].highlight ? "bg-white/[0.015]" : ""
+                      }`}
+                    >
+                      <Cell value={val} highlight={plans[ci].highlight} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {/* Bottom CTA row */}
+          <div
+            className="border-t border-[#1e1e1e] bg-[#0a0a0a]"
+            style={{ display: "grid", gridTemplateColumns: "35% 1fr 1fr 1fr" }}
+          >
+            <div className="p-6" />
+            {plans.map((p) => (
+              <div
+                key={p.tier}
+                className={`p-6 border-l border-[#1e1e1e] flex justify-center ${p.highlight ? "bg-white/[0.02]" : ""}`}
+              >
+                <Link
+                  href={isLoggedIn ? "/subscription" : "/register"}
+                  className={`px-8 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
+                    p.highlight
+                      ? "bg-white text-black hover:bg-zinc-100"
+                      : "bg-[#1a1a1a] text-white border border-[#2a2a2a] hover:border-white/20"
+                  }`}
+                >
+                  {p.trialFree ? "Start free trial" : "Get started"}
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      </motion.div>
 
     </section>
   );

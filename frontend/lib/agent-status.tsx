@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { agentApi } from "./api";
 import { toast } from "sonner";
@@ -18,6 +18,11 @@ interface AgentStatus {
   applications_today: number;
 }
 
+interface PersistedTask {
+  task: string;
+  startedAt: number; // timestamp
+}
+
 interface AgentStatusContextType {
   status: AgentStatus | null;
   isLoading: boolean;
@@ -27,13 +32,45 @@ interface AgentStatusContextType {
   isMutating: boolean;
 }
 
+const STORAGE_KEY = "applivo_agent_task";
+const MAX_TASK_AGE_MS = 30 * 60 * 1000; // 30 minutes safety cap
+
+function readStoredTask(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: PersistedTask = JSON.parse(raw);
+    const age = Date.now() - parsed.startedAt;
+    if (age > MAX_TASK_AGE_MS) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return parsed.task;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeStoredTask(task: string | null) {
+  if (typeof window === "undefined") return;
+  if (!task) {
+    localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ task, startedAt: Date.now() }));
+}
+
 const AgentStatusContext = createContext<AgentStatusContextType | null>(null);
 
 export function AgentStatusProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
-
   const { user } = useAuth();
-  const [optimisticTask, setOptimisticTask] = useState<string | null>(null);
+
+  // Restore optimistic task from localStorage on mount so it survives
+  // page navigation, hard refreshes, and tab switches.
+  const [optimisticTask, setOptimisticTask] = useState<string | null>(readStoredTask);
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["agent-status"],
@@ -42,31 +79,29 @@ export function AgentStatusProvider({ children }: { children: React.ReactNode })
     enabled: !!user,
     refetchInterval: (query) => {
       if (!user) return false;
-      // Poll every 1s while the backend reports an active task for real-time updates
-      // Otherwise poll every 10s for background updates
       const data = query.state.data as AgentStatus | undefined;
       return data?.is_running ? 1000 : 10000;
     },
   });
-  // In React Query v5, onSuccess is removed from useQuery.
-  // We must use useEffect to synchronize state when data changes.
+
+  // Sync optimisticTask with backend status and localStorage
   useEffect(() => {
     if (!status) return;
 
-    // If backend is still running, sync optimistic state with server current_task
     if (status.is_running && status.current_task) {
       setOptimisticTask(status.current_task);
+      writeStoredTask(status.current_task);
       return;
     }
 
-    // If backend is not running, always clear optimistic task
     if (!status.is_running) {
       setOptimisticTask(null);
+      writeStoredTask(null);
     }
   }, [status?.is_running, status?.current_task, status]);
 
   const runMutation = useMutation({
-    mutationFn: (variables: { taskType: string; payload?: Record<string, unknown> }) => 
+    mutationFn: (variables: { taskType: string; payload?: Record<string, unknown> }) =>
       agentApi.run({ task_type: variables.taskType, payload: variables.payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent-status"] });
@@ -78,15 +113,42 @@ export function AgentStatusProvider({ children }: { children: React.ReactNode })
       } else {
         toast.error("Failed to start agent task.");
       }
+      // Clear stored task on error so UI doesn't stay stuck
+      setOptimisticTask(null);
+      writeStoredTask(null);
     },
   });
 
-  const runTask = async (taskType: string, payload?: Record<string, unknown>) => {
-    setOptimisticTask(taskType);
-    await runMutation.mutateAsync({ taskType, payload });
+  const runTask = useCallback(
+    async (taskType: string, payload?: Record<string, unknown>) => {
+      setOptimisticTask(taskType);
+      writeStoredTask(taskType);
+      await runMutation.mutateAsync({ taskType, payload });
+    },
+    [runMutation]
+  );
+
+  // Backend returns uppercase enum values (SCRAPE_JOBS) but frontend keys are lowercase
+  const normalizeTask = (task: string | null): string | null => {
+    if (!task) return null;
+    const map: Record<string, string> = {
+      scrape_jobs: "scrape_jobs",
+      analyze_jobs: "analyze_jobs",
+      analyze_job: "analyze_jobs",
+      queue_jobs: "queue_jobs",
+      analyze_and_queue: "queue_jobs",
+      apply_queued: "apply_queued",
+      apply_que: "apply_queued",
+      // Uppercase variants from backend enum
+      SCRAPE_JOBS: "scrape_jobs",
+      ANALYZE_JOB: "analyze_jobs",
+      ANALYZE_AND_QUEUE: "queue_jobs",
+      APPLY_QUEUED: "apply_queued",
+    };
+    return map[task] || task.toLowerCase();
   };
 
-  const currentTaskLabel = status?.current_task || optimisticTask || null;
+  const currentTaskLabel = normalizeTask(status?.current_task || optimisticTask || null);
   const isWorking = !!status?.is_running || runMutation.isPending || !!currentTaskLabel;
 
   return (

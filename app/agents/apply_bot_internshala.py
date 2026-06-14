@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import random
 import re
 from datetime import datetime, timezone, timedelta
@@ -802,18 +803,18 @@ async def _is_logged_in(page) -> bool:
             logger.debug("_is_logged_in found /student/ in URL")
             return True
         
-        # Check for multiple logged-in indicators
+        # Strict logged-in indicators only.
+        # NOTE: Removed generic nav selectors (e.g. .nav-link:has-text('Internships'))
+        # that exist for BOTH logged-in and logged-out users.
         selectors = [
             ".profile-header", "#header-profile-img",
             "a[href*='/student/dashboard']", "a[href*='/student/profile']",
             ".student-profile-pic", ".logged-in-header",
-            "a[href*='/student/']", ".user-profile",
-            ".nav-item.profile", ".profile-dropdown",
+            ".user-profile", ".profile-dropdown",
+            ".nav-item.profile",
             "img[alt*='profile' i]", ".avatar",
             "a:has-text('Logout')", "a:has-text('Sign Out')",
             "a[href*='logout']", "a[href*='signout']",
-            # Internshala specific
-            ".nav-link:has-text('Internships')", ".nav-link:has-text('Jobs')",
         ]
         for sel in selectors:
             try:
@@ -831,7 +832,6 @@ async def _is_logged_in(page) -> bool:
             logger.warning("Security check detected during login check")
             return False
 
-        # If none of the above specific selectors or keywords were found, we are likely not logged in
         logger.debug("_is_logged_in returning False", url=url)
         return False
     except Exception as e:
@@ -2120,64 +2120,90 @@ async def _fill_application_form(
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None, user_full_name: Optional[str] = None) -> dict:
+async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None, user_full_name: Optional[str] = None, is_retry: bool = False) -> dict:
     context = page.context
 
-    # First try to load from file (legacy)
-    cookies = _load_cookies()
-    
-    # If no file cookies, try to load from database
-    if not cookies and user_id:
+    # ── Cookie Loading ───────────────────────────────────────
+    # In multi-user SaaS mode, ALWAYS prefer per-user DB cookies.
+    # Only fall back to the legacy shared file for single-user / CLI usage.
+    cookies: list = []
+
+    if user_id:
         try:
             from app.services.cookie_service import cookie_service
-            cookies = await cookie_service.get_cookies(user_id, "internshala")
-            if cookies:
-                logger.info("Loaded cookies from database", count=len(cookies))
+            db_cookies = await cookie_service.get_cookies(user_id, "internshala")
+            if db_cookies:
+                cookies = db_cookies if isinstance(db_cookies, list) else [db_cookies]
+                logger.info("Loaded cookies from database", user_id=user_id, count=len(cookies))
         except Exception as e:
-            logger.warning("Could not load cookies from database", error=str(e))
+            logger.warning("Could not load cookies from database", user_id=user_id, error=str(e))
+
+    # Legacy fallback: shared cookie file (only when no DB cookies and no user_id)
+    if not cookies:
+        cookies = _load_cookies()
+        if cookies:
+            logger.info("Loaded cookies from legacy shared file", count=len(cookies))
     
+    # When using a persistent browser profile, the session is already stored
+    # in the profile's Cookie DB. However, persistent profiles don't get the
+    # stealth script, which causes Internshala to detect automation.
+    # We now ALWAYS inject cookies with stealth, regardless of profile type.
+    # This is more reliable than relying on the persistent profile alone.
+    persistent_profile = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
+    using_persistent = bool(persistent_profile)
+    
+    # ── Always add stealth script first ──────────────────────
+    await page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'connection', {
+            get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
+        });
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => Object.assign(
+                [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1 },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1 },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2 },
+                    { name: 'Widevine Content Decryption Module', filename: 'widevinecdmadapter.dll', description: 'Widevine Content Decryption Module', length: 2 }
+                ],
+                { length: 4 }
+            )
+        });
+        Object.defineProperty(navigator, 'mimeTypes', {
+            get: () => Object.assign(
+                [
+                    { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: { name: 'Chrome PDF Plugin' } },
+                    { type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: { name: 'Chrome PDF Viewer' } },
+                    { type: 'application/x-nacl', suffixes: '', description: 'Native Client module', enabledPlugin: { name: 'Native Client' } }
+                ],
+                { length: 3 }
+            )
+        });
+        // Hide Playwright-specific properties
+        delete navigator.__proto__.webdriver;
+        window.chrome = { runtime: {} };
+        // Override permissions API
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+    """)
+
+    # ── Always inject cookies from DB ──────────────────────────
     if cookies:
-        # ── Advanced Stealth Fingerprinting ──────────────────────
-        await page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-            Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [
-                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                    { name: 'Native Client', filename: 'internal-nacl-plugin' }
-                ]
-            });
-            window.chrome = {
-                runtime: { connect: () => ({}), sendMessage: () => {} },
-                loadTimes: () => ({}),
-                csi: () => ({})
-            };
-
-            const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
-            if (originalQuery) {
-                window.navigator.permissions.query = (parameters) =>
-                    parameters && parameters.name === 'notifications'
-                        ? Promise.resolve({ state: Notification.permission })
-                        : originalQuery(parameters);
-            }
-
-            delete window.__playwright;
-            delete window.__pw_manual;
-            delete window.playwrightBinding;
-        """)
-        # ─────────────────────────────────────────────────────────────
-
-        # Inject cookies first
         try:
             await context.add_cookies(cookies)
             logger.info("Injected cookies", count=len(cookies))
         except Exception as e:
             logger.warning("Could not inject cookies", error=str(e))
-
+    else:
+        logger.warning("No cookies available to inject")
 
     await _goto_lenient(page, "https://internshala.com/", timeout_ms=60000)
     await asyncio.sleep(random.uniform(2, 3))
@@ -2201,8 +2227,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         if not result["success"]:
             return result
         
-        # Save cookies to file AND database
-        await _save_cookies(context)
+        # Save cookies to database (primary) and per-user file (backup)
         if user_id:
             try:
                 from app.services.cookie_service import cookie_service
@@ -2210,9 +2235,25 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                 await cookie_service.save_cookies(user_id, "internshala", new_cookies)
                 logger.info("Automatic login cookies saved to database", user_id=user_id)
             except Exception as e:
-                logger.warning("Failed to save automatic login cookies to database", error=str(e))
+                logger.warning("Failed to save automatic login cookies to database", user_id=user_id, error=str(e))
+        # Always save to file as fallback / for debugging
+        await _save_cookies(context)
 
     logger.info("Logged in", status=True)
+
+    # Human warm-up: scroll homepage briefly before going to job
+    await asyncio.sleep(random.uniform(3, 7))
+    try:
+        for _ in range(random.randint(2, 4)):
+            await page.mouse.wheel(0, random.randint(200, 500))
+            await asyncio.sleep(random.uniform(0.4, 1.2))
+        await page.mouse.move(
+            random.uniform(200, 800),
+            random.uniform(200, 500),
+        )
+        await asyncio.sleep(random.uniform(1, 2))
+    except Exception:
+        pass
 
     # Extract internship ID from URL — handles three URL formats:
     #   /internships/detail/3086913               → pure numeric
@@ -2461,13 +2502,11 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         return {"success": False, "ineligible": True, "error": "Login required to apply"}
     
     # Check if button is disabled but not "not eligible" - still try to click
+    btn_was_disabled = False
     if is_disabled is not None:
         logger.warning("Button is disabled but not showing 'not eligible' - will attempt click anyway")
         btn_was_disabled = True
-    else:
-        btn_was_disabled = False
 
-    # Skip waiting loop for disabled buttons - go directly to click attempt
         # Try to scroll button into view and wait for it to be enabled
         try:
             await apply_btn.scroll_into_view_if_needed()
@@ -2763,9 +2802,29 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                 await _goto_lenient(page, "https://internshala.com/", timeout_ms=30000)
                 await asyncio.sleep(3)
                 
-                # Verify we're still logged in
+                # Verify we're still logged in (strict check)
                 if not await _is_logged_in(page):
-                    return {"success": False, "error": "Session lost after CSRF refresh - need to re-authenticate"}
+                    logger.warning("Session lost - attempting auto-login recovery")
+                    email = getattr(settings_obj, "INTERNShALA_EMAIL", "")
+                    password = getattr(settings_obj, "INTERNShALA_PASSWORD", "")
+                    if email and password:
+                        login_result = await _do_login(page, email, password)
+                        if login_result.get("success"):
+                            logger.info("Auto-login succeeded after session loss")
+                            # Save refreshed cookies
+                            if user_id:
+                                try:
+                                    from app.services.cookie_service import cookie_service
+                                    new_cookies = await page.context.cookies()
+                                    await cookie_service.save_cookies(user_id, "internshala", new_cookies)
+                                except Exception as e:
+                                    logger.warning("Failed to save refreshed cookies", error=str(e))
+                            await _save_cookies(page.context)
+                        else:
+                            logger.error("Auto-login failed", error=login_result.get("error"))
+                            return {"success": False, "error": f"Session lost and auto-login failed: {login_result.get('error')}"}
+                    else:
+                        return {"success": False, "error": "Session lost and no login credentials configured"}
                 
                 logger.info("Session refreshed - retrying apply on internship")
                 # Navigate back to internship detail page

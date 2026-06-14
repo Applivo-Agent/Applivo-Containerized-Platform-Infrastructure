@@ -94,15 +94,15 @@ class BaseScraper(ABC):
         if isinstance(value, ExperienceLevel):
             return value
 
-        normalized = str(value or "unknown").strip().upper().replace("-", "_")
+        normalized = str(value or "unknown").strip().lower().replace("-", "_")
         mapping = {
-            "ENTRY": ExperienceLevel.ENTRY,
-            "MID": ExperienceLevel.MID,
-            "MID_LEVEL": ExperienceLevel.MID,
-            "SENIOR": ExperienceLevel.SENIOR,
-            "LEAD": ExperienceLevel.LEAD,
-            "EXECUTIVE": ExperienceLevel.EXECUTIVE,
-            "UNKNOWN": ExperienceLevel.UNKNOWN,
+            "entry": ExperienceLevel.ENTRY,
+            "mid": ExperienceLevel.MID,
+            "mid_level": ExperienceLevel.MID,
+            "senior": ExperienceLevel.SENIOR,
+            "lead": ExperienceLevel.LEAD,
+            "executive": ExperienceLevel.EXECUTIVE,
+            "unknown": ExperienceLevel.UNKNOWN,
         }
         return mapping.get(normalized, ExperienceLevel.UNKNOWN)
 

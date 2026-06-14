@@ -212,12 +212,16 @@ class EnhancedCareerAssistant:
 
         actions_taken = []
         try:
+            from app.services.ai_router import AIRouter
+            ai_settings = await AIRouter.load_user_ai_settings(self.user.id) if self.user else None
             response = await ai_router.chat_completions_create(
                 messages=messages,
                 model=settings.OPENAI_MODEL_LIGHT,
                 max_tokens=1200,
                 temperature=0.7,
                 tools=TOOL_DEFINITIONS if self.persona != AI_Persona.GENERAL else None,
+                ai_settings=ai_settings,
+                user_id=self.user.id if self.user else None,
             )
             
             tool_calls = response.get("tool_calls", [])

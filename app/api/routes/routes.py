@@ -1128,8 +1128,34 @@ async def get_agent_status(
 
     last_task = tasks_today[0] if tasks_today else None
 
+    # Fetch the user's most recent workflow execution (if any)
+    active_workflow = None
+    try:
+        from app.services.workflow_service import workflow_service
+        from app.models.workflow import WorkflowExecution
+        from app.schemas import WorkflowExecutionOut
+        from app.core.database import get_db_context
+        from sqlalchemy.orm import selectinload
+
+        wf = await workflow_service.get_latest_workflow(current_user.id)
+        if wf and wf.status.value in ("PENDING", "RUNNING", "FAILED", "COMPLETED", "CANCELLED"):
+            async with get_db_context() as _db:
+                wf_loaded = (
+                    await _db.execute(
+                        select(WorkflowExecution)
+                        .where(WorkflowExecution.id == wf.id)
+                        .options(selectinload(WorkflowExecution.steps))
+                    )
+                ).scalar_one_or_none()
+                if wf_loaded:
+                    active_workflow = WorkflowExecutionOut.model_validate(wf_loaded)
+    except Exception:
+        pass
+
+    is_running_workflow = active_workflow.status in ("PENDING", "RUNNING") if active_workflow else False
+
     return AgentStatusResponse(
-        is_running=len(running) > 0,
+        is_running=len(running) > 0 or is_running_workflow,
         current_task=running[0].task_type if running else None,
         last_run=last_task.created_at if last_task else None,
         next_run_at=None,  # Populated by scheduler
@@ -1138,6 +1164,7 @@ async def get_agent_status(
         tasks_failed=len(failed),
         jobs_found_today=jobs_today or 0,
         applications_today=apps_today or 0,
+        active_workflow=active_workflow,
     )
 
 
@@ -1945,3 +1972,90 @@ async def list_interview_sessions(
         }
         for s in sessions
     ]
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Workflow Pipeline API
+# ═══════════════════════════════════════════════════════════════════════════
+
+from app.schemas import WorkflowExecutionOut, WorkflowRunResponse
+from app.services.workflow_service import workflow_service
+
+
+workflow_router = APIRouter(prefix="/workflows", tags=["Workflows"])
+
+
+@workflow_router.post("/run", response_model=WorkflowRunResponse)
+async def run_workflow(
+    current_user: User = Depends(require_active_subscription),
+):
+    """Trigger the Scrape → Analyze → Queue → Deploy pipeline for the current user."""
+    workflow = await workflow_service.trigger_workflow(current_user.id)
+    return WorkflowRunResponse(
+        workflow_id=workflow.id,
+        status=workflow.status.value,
+        message="Workflow started",
+    )
+
+
+@workflow_router.get("/latest", response_model=Optional[WorkflowExecutionOut])
+async def get_latest_workflow(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the most recent workflow execution for the current user."""
+    from sqlalchemy.orm import selectinload
+    from app.models.workflow import WorkflowExecution
+
+    workflow = await workflow_service.get_latest_workflow(current_user.id)
+    if not workflow:
+        return None
+
+    async with get_db_context() as db:
+        loaded = (
+            await db.execute(
+                select(WorkflowExecution)
+                .where(WorkflowExecution.id == workflow.id)
+                .options(selectinload(WorkflowExecution.steps))
+            )
+        ).scalar_one_or_none()
+        if loaded:
+            return WorkflowExecutionOut.model_validate(loaded)
+    return None
+
+
+@workflow_router.get("/{workflow_id}", response_model=WorkflowExecutionOut)
+async def get_workflow_by_id(
+    workflow_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Get a specific workflow execution by ID."""
+    from sqlalchemy.orm import selectinload
+    from app.models.workflow import WorkflowExecution
+
+    async with get_db_context() as db:
+        workflow = (
+            await db.execute(
+                select(WorkflowExecution)
+                .where(
+                    WorkflowExecution.id == workflow_id,
+                    WorkflowExecution.user_id == current_user.id,
+                )
+                .options(selectinload(WorkflowExecution.steps))
+            )
+        ).scalar_one_or_none()
+
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return WorkflowExecutionOut.model_validate(workflow)
+
+
+@workflow_router.post("/{workflow_id}/cancel")
+async def cancel_workflow(
+    workflow_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel a running or pending workflow."""
+    ok = await workflow_service.cancel_workflow(workflow_id, current_user.id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Workflow cannot be cancelled")
+    return {"success": True, "message": "Workflow cancelled"}

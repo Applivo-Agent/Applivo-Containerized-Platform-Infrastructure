@@ -25,6 +25,7 @@ from app.api.routes.profile import router as profile_router
 from app.api.routes.security import router as security_router
 from app.api.routes.onboarding import router as onboarding_router
 from app.api.routes.scheduler import router as scheduler_router
+from app.api.routes.settings_v2 import settings_v2_router
 from app.api.routes.settings_route import settings_router
 from app.api.routes.subscriptions import router as subscriptions_router
 from app.api.routes.payments import router as payments_router
@@ -38,6 +39,7 @@ from app.api.routes.routes import (
     agent_router,
     analytics_router,
     chat_router,
+    workflow_router,
 )
 
 logger = structlog.get_logger()
@@ -228,10 +230,10 @@ async def _run_postgres_schema_reconciliation() -> None:
 
             # Normalize legacy lowercase enum-like values to canonical uppercase
             try:
-                await db.execute(text("UPDATE jobs SET source = UPPER(source::text) WHERE source IS NOT NULL AND source::text <> UPPER(source::text)"))
-                await db.execute(text("UPDATE jobs SET experience_level = UPPER(experience_level::text) WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)"))
-                await db.execute(text("UPDATE user_profiles SET experience_level = UPPER(experience_level::text) WHERE experience_level IS NOT NULL AND experience_level::text <> UPPER(experience_level::text)"))
-                logger.info("Normalized legacy enum-like string values to uppercase")
+                await db.execute(text("UPDATE jobs SET source = UPPER(source::text)::jobsource WHERE source IS NOT NULL AND source::text <> UPPER(source::text)"))
+                await db.execute(text("UPDATE jobs SET experience_level = LOWER(experience_level::text)::experiencelevel WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)"))
+                await db.execute(text("UPDATE user_profiles SET experience_level = LOWER(experience_level::text)::experiencelevel WHERE experience_level IS NOT NULL AND experience_level::text <> LOWER(experience_level::text)"))
+                logger.info("Normalized legacy enum-like string values")
             except Exception as exc:
                 logger.warning("Failed to normalize legacy enum strings", error=str(exc))
 
@@ -387,13 +389,13 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     client_ip = request.client.host if request.client else "unknown"
-    is_local_client = client_ip in {"127.0.0.1", "::1", "localhost"}
-    
+
     if request.url.path in ["/api/auth/login", "/api/auth/register", "/api/auth/login/initiate", "/api/auth/register/initiate"]:
         auth_key = f"auth_rate:{client_ip}"
         auth_max_requests = settings.AUTH_RATE_LIMIT_REQUESTS
         auth_window_seconds = settings.AUTH_RATE_LIMIT_WINDOW_SECONDS
-        if settings.APP_ENV == "development" and is_local_client:
+        # Relaxed limits for all clients when APP_ENV=development (Docker uses 192.168.x IPs).
+        if settings.APP_ENV == "development":
             auth_max_requests = settings.AUTH_RATE_LIMIT_DEV_REQUESTS
             auth_window_seconds = settings.AUTH_RATE_LIMIT_DEV_WINDOW_SECONDS
 
@@ -443,8 +445,10 @@ app.include_router(applications_router, prefix=API_PREFIX)
 app.include_router(resumes_router, prefix=API_PREFIX)
 app.include_router(cover_letters_router, prefix=API_PREFIX)
 app.include_router(agent_router, prefix=API_PREFIX)
+app.include_router(workflow_router, prefix=API_PREFIX)
 app.include_router(analytics_router, prefix=API_PREFIX)
 app.include_router(settings_router, prefix=API_PREFIX)
+app.include_router(settings_v2_router, prefix=API_PREFIX)
 app.include_router(chat_router, prefix=API_PREFIX)
 
 # SaaS billing & subscription

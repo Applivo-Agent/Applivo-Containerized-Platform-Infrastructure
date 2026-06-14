@@ -39,19 +39,19 @@ export default function ChangelogPage() {
 
         {/* Timeline Container */}
         <div className="relative">
-          
-          {/* v3 — Current Release */}
+
+          {/* v3.1 — Current Release */}
           <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-12 lg:gap-24 mb-32 group">
             {/* Left: Date + Dot */}
             <div className="relative flex lg:flex-col items-start lg:items-end pt-2">
               <div className="sticky top-24 flex items-center gap-4 lg:gap-6 z-20">
                 <span className="px-4 py-1.5 rounded-full border border-white/20 bg-white/5 text-white text-[10px] md:text-[11px] font-bold tracking-widest uppercase whitespace-nowrap shadow-[0_0_15px_rgba(255,255,255,0.05)]">
-                  April 15, 2026
+                  June 13, 2026
                 </span>
                 <div className="hidden lg:block w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] border-2 border-black" />
               </div>
               {/* Vertical Line */}
-              <div className="absolute hidden lg:block right-[4.5px] top-6 bottom-[-128px] w-px bg-zinc-800 group-last:bg-gradient-to-b group-last:from-zinc-800 group-last:to-transparent" />
+              <div className="absolute hidden lg:block right-[4.5px] top-6 bottom-[-128px] w-px bg-zinc-800" />
             </div>
 
             {/* Right: Content */}
@@ -59,6 +59,246 @@ export default function ChangelogPage() {
               <div>
                 <div className="flex items-center gap-3 mb-4">
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest bg-white text-black">Current</span>
+                  <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">v3.1.0</span>
+                </div>
+                <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-12">AI Orchestration Engine</h2>
+
+                {/* Feature Image */}
+                <div className="relative w-full aspect-[21/9] rounded-2xl overflow-hidden border border-white/10 mb-12 shadow-2xl group/image bg-zinc-950">
+                  <Image
+                    src="/assets/changelog/v3-orchestration.png"
+                    alt="AI Orchestration Engine"
+                    fill
+                    className="object-cover transition-transform duration-700 group-hover/image:scale-105"
+                    onError={() => {}}
+                  />
+                  <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/60 to-transparent" />
+                </div>
+
+                <div className="space-y-16">
+
+                  {/* Multi-Provider */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Multi-Provider AI Infrastructure</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">Major Update</span>
+                      <span className="px-2 py-0.5 rounded-full border border-zinc-800 bg-zinc-900 text-[10px] font-medium text-zinc-500">Infrastructure</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      Applivo now routes AI requests through a unified orchestration layer spanning three providers — Groq, Gemini, and OpenRouter. This enables higher reliability, broader model coverage, and intelligent provider switching without any user-facing disruption.
+                    </p>
+                    <div className="grid grid-cols-3 gap-4 max-w-xl pt-2">
+                      {["Groq", "Gemini", "OpenRouter"].map((p) => (
+                        <div key={p} className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 text-center">
+                          <p className="text-sm font-bold text-zinc-200">{p}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Dynamic Model Selection */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Dynamic Model Selection</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      Users can now select their preferred AI model directly from Settings. Models are grouped by plan tier with real-time availability gating.
+                    </p>
+                    <div className="overflow-hidden rounded-2xl border border-white/5 bg-zinc-900/30 max-w-2xl">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="border-b border-white/5 text-zinc-500 uppercase text-[9px] font-black tracking-[0.2em]">
+                            <th className="px-5 py-3">Model</th>
+                            <th className="px-5 py-3">Provider</th>
+                            <th className="px-5 py-3">Plan</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-zinc-300 font-medium">
+                          {[
+                            ["Auto", "Groq", "Free"],
+                            ["Llama 3.1 8B", "Groq", "Free"],
+                            ["Llama 3.3 70B", "Groq", "Free"],
+                            ["Gemini 1.5 Flash", "Gemini", "Free"],
+                            ["DeepSeek V3", "OpenRouter", "Free"],
+                            ["Qwen 3", "OpenRouter", "Free"],
+                            ["Claude Sonnet 4", "OpenRouter", "Pro"],
+                            ["Gemini 2.5 Pro", "Gemini", "Pro"],
+                            ["DeepSeek R1", "OpenRouter", "Pro"],
+                            ["Claude Opus 4.1", "OpenRouter", "Premium"],
+                            ["GPT-5", "OpenRouter", "Premium"],
+                          ].map(([model, provider, plan]) => (
+                            <tr key={model}>
+                              <td className="px-5 py-3">{model}</td>
+                              <td className="px-5 py-3 text-zinc-500">{provider}</td>
+                              <td className="px-5 py-3">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                                  plan === "Free" ? "bg-zinc-800 text-zinc-400" :
+                                  plan === "Pro" ? "bg-blue-500/10 text-blue-400" :
+                                  "bg-amber-500/10 text-amber-400"
+                                }`}>{plan}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Intelligent Routing */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Intelligent Model Routing</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                      <span className="px-2 py-0.5 rounded-full border border-zinc-800 bg-zinc-900 text-[10px] font-medium text-zinc-500">AI Pipeline</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      A new routing engine determines the optimal model for every request based on user preference, plan permissions, real-time availability, and latency signals — without any manual intervention.
+                    </p>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-8 list-none text-sm text-zinc-500 max-w-xl">
+                      {["User preference", "Plan permissions", "Real-time availability", "Performance signals", "Latency optimization", "Cost awareness"].map((item) => (
+                        <li key={item} className="flex items-center gap-2">
+                          <div className="w-1 h-1 rounded-full bg-white/20" /> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Smart Fallback */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Smart Fallback System</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      When a model becomes unavailable due to rate limits, provider outages, or capacity restrictions, Applivo automatically reroutes to the next best alternative. Three strategies available:
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl pt-2">
+                      {[
+                        { label: "Fastest", desc: "Groq → Gemini Flash → DeepSeek" },
+                        { label: "Balanced", desc: "Groq 70B → Gemini → DeepSeek" },
+                        { label: "Best Quality", desc: "Claude Sonnet → R1 → Gemini Pro" },
+                      ].map((s) => (
+                        <div key={s.label} className="p-5 rounded-2xl bg-zinc-900/50 border border-white/5">
+                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">{s.label}</p>
+                          <p className="text-sm text-zinc-300">{s.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Reasoning Profiles */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Reasoning Profiles</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      New reasoning modes control inference depth, injected into every AI request across the platform.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl pt-2">
+                      {[
+                        { label: "Fast", temp: "0.2", tokens: "1k", note: "Lowest latency, cost optimized" },
+                        { label: "Balanced", temp: "0.4", tokens: "2.5k", note: "Speed / quality tradeoff" },
+                        { label: "Deep", temp: "0.7", tokens: "5k", note: "Extended reasoning, max quality" },
+                      ].map((r) => (
+                        <div key={r.label} className="p-5 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-3">
+                          <p className="text-sm font-bold text-white">{r.label}</p>
+                          <div className="flex gap-4 text-[10px] text-zinc-500 font-mono">
+                            <span>temp={r.temp}</span>
+                            <span>{r.tokens} tokens</span>
+                          </div>
+                          <p className="text-xs text-zinc-500">{r.note}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Generation Styles */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">Application Generation Styles</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      Four specialized generation frameworks injected into every cover letter, resume optimization, follow-up, and AI chat response.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl pt-2">
+                      {[
+                        { label: "Professional", desc: "Enterprise and ATS-optimized communication." },
+                        { label: "Technical", desc: "Engineering-focused language and terminology." },
+                        { label: "Startup", desc: "Builder-oriented, impact-driven communication." },
+                        { label: "Enterprise", desc: "Executive-level, process-oriented communication." },
+                      ].map((s) => (
+                        <div key={s.label} className="p-5 rounded-2xl bg-zinc-900/50 border border-white/5">
+                          <p className="text-sm font-bold text-white mb-1">{s.label}</p>
+                          <p className="text-xs text-zinc-500">{s.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Persistent Settings + Audit */}
+                  <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-white tracking-tight">Persistent Settings Engine</h3>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      All AI preferences now survive page refresh, logout/login, and deployment restarts. Provider, model, reasoning profile, generation style, and fallback strategy are stored per-user in the database.
+                    </p>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-y-3 gap-x-8 list-none text-sm text-zinc-500 max-w-xl">
+                      {[
+                        "Settings V2 API",
+                        "User Settings Database",
+                        "Audit Log System (full change history)",
+                        "Session Management",
+                        "Active session listing",
+                        "Logout from all devices",
+                      ].map((item) => (
+                        <li key={item} className="flex items-center gap-2">
+                          <div className="w-1 h-1 rounded-full bg-white/20" /> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Free Trial */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="text-xl font-bold text-white tracking-tight">7-Day Free Trial</h3>
+                      <span className="px-2 py-0.5 rounded-full border border-white/20 bg-white/5 text-[10px] font-medium text-white/80">New</span>
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed text-base max-w-3xl">
+                      New users now receive 7-day Starter access with full AI features — no credit card required upfront.
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-xl pt-2">
+                      {["AI Resume Generation", "AI Cover Letters", "Job Automation", "AI Chat", "Multi-Model Access", "Dynamic Model Routing"].map((f) => (
+                        <div key={f} className="px-4 py-3 rounded-xl bg-zinc-900/50 border border-white/5 text-xs text-zinc-400 font-medium">{f}</div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* v3.0 — Previous Release */}
+          <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-12 lg:gap-24 mb-32 group">
+            {/* Left: Date + Dot */}
+            <div className="relative flex lg:flex-col items-start lg:items-end pt-2">
+              <div className="sticky top-24 flex items-center gap-4 lg:gap-6 z-20">
+                <span className="px-4 py-1.5 rounded-full border border-zinc-800 bg-zinc-900/50 text-zinc-400 text-[10px] md:text-[11px] font-bold tracking-widest uppercase whitespace-nowrap">
+                  April 15, 2026
+                </span>
+                <div className="hidden lg:block w-2.5 h-2.5 rounded-full bg-zinc-700 border-2 border-black" />
+              </div>
+              {/* Vertical Line */}
+              <div className="absolute hidden lg:block right-[4.5px] top-6 bottom-[-128px] w-px bg-zinc-800" />
+            </div>
+
+            {/* Right: Content */}
+            <div className="space-y-12">
+              <div>
+                <div className="flex items-center gap-3 mb-4">
                   <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">v3.0.0</span>
                 </div>
                 <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-12">The AI Transformation</h2>

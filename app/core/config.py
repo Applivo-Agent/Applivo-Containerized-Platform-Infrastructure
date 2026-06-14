@@ -34,27 +34,32 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = "change_me_in_prod"
 
+    def build_redis_url(self, db: int = 0) -> str:
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{db}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{db}"
+
     @property
     def REDIS_URL(self) -> str:
-        if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/0"
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        return self.build_redis_url(0)
 
     # -----------------------------
     # Celery
     # -----------------------------
     @property
     def CELERY_BROKER_URL(self) -> str:
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        return self.build_redis_url(0)
 
     @property
     def CELERY_RESULT_BACKEND(self) -> str:
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+        return self.build_redis_url(1)
     OPENAI_API_KEY: str = ""      # Legacy field — use GROQ_API_KEY instead
     GROQ_API_KEY: str = ""         # Groq API key (gsk_...) — used for all AI calls
     GEMINI_API_KEY: str = ""       # Gemini API key for fallback
-    AI_PROVIDER: str = "groq"      # Primary: groq | gemini
+    OPENROUTER_API_KEY: str = ""   # OpenRouter API key for premium models
+    AI_PROVIDER: str = "groq"      # Primary: groq | gemini | openrouter
     FALLBACK_PROVIDER: str = "gemini"  # Fallback when primary fails
+    AI_ENABLE_OPENROUTER: bool = True
     OPENAI_MODEL_HEAVY: str = "llama-3.3-70b-versatile"
     OPENAI_MODEL_LIGHT: str = "llama-3.1-8b-instant"
 
@@ -210,5 +215,12 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+def reload_settings() -> Settings:
+    """Clear cached settings (e.g. after .env changes in dev)."""
+    get_settings.cache_clear()
+    return get_settings()
+
 
 settings = get_settings()

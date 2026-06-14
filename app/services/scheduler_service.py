@@ -237,45 +237,74 @@ def setup_default_jobs():
     logger.info("Default jobs configured")
 
 
+_SCHEDULER_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _get_scheduler_loop() -> asyncio.AbstractEventLoop:
+    """Return a stable event loop for APScheduler background thread.
+
+    Reusing one loop avoids cross-loop asyncpg futures when SQLAlchemy keeps
+    pooled connections across scheduled job executions.
+    """
+    global _SCHEDULER_LOOP
+
+    if _SCHEDULER_LOOP is None or _SCHEDULER_LOOP.is_closed():
+        _SCHEDULER_LOOP = asyncio.new_event_loop()
+
+    return _SCHEDULER_LOOP
+
+
 def scan_platform_messages_job():
-    """Scan all user platform messages."""
+    """Scan all user platform messages.
+
+    DEV NOTE: This job uses asyncio in a BackgroundScheduler thread, which
+    conflicts with the shared asyncpg engine pool. In production this should
+    run via Celery; in dev we skip it to avoid cross-loop errors.
+    """
+    from app.core.config import settings
+
+    # Skip in development — no real platform messages to scan and the shared
+    # asyncpg engine causes cross-loop RuntimeErrors from BackgroundScheduler.
+    if settings.APP_ENV in ("development", "testing"):
+        logger.debug("Platform messages scan skipped in dev/test mode")
+        return
+
     from app.services.message_scanner_service import message_scanner_service
     from app.models.user import User
     from sqlalchemy import select
     from app.core.database import get_db_context
-    
+
+    async def _scan():
+        async with get_db_context() as db:
+            result = await db.execute(
+                select(User.id).where(User.is_active == True)
+            )
+            user_ids = [r[0] for r in result.fetchall()]
+
+        for user_id in user_ids:
+            try:
+                await message_scanner_service.scan_user_messages(user_id, "internshala")
+            except Exception as e:
+                logger.error("Failed to scan messages for user", user_id=user_id, error=str(e))
+
     try:
-        import asyncio
-        loop = asyncio.new_event_loop()
-        
-        async def _scan():
-            async with get_db_context() as db:
-                result = await db.execute(
-                    select(User.id).where(User.is_active == True)
-                )
-                user_ids = [r[0] for r in result.fetchall()]
-            
-            for user_id in user_ids:
-                try:
-                    await message_scanner_service.scan_user_messages(user_id, "internshala")
-                except Exception as e:
-                    logger.error("Failed to scan messages for user", user_id=user_id, error=str(e))
-        
+        loop = _get_scheduler_loop()
+        asyncio.set_event_loop(loop)
         loop.run_until_complete(_scan())
-        loop.close()
         logger.info("Platform messages scan completed")
+    except RuntimeError as e:
+        # Known issue: asyncpg connections from the shared pool are bound to
+        # the main event loop and cannot be closed from the scheduler thread.
+        logger.warning("Messages scan skipped due to cross-loop engine conflict", error=str(e)[:100])
     except Exception as e:
         logger.error("Failed to run messages scan", error=str(e))
 
 
 def _run_async(coro):
     """Run an async coroutine from a sync BackgroundScheduler thread."""
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    loop = _get_scheduler_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def run_scrape_job():

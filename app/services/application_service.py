@@ -147,14 +147,16 @@ class ApplicationService:
                 queued_job_ids.add(job.id)
 
                 if not profile.require_apply_approval:
+                    # Commit each application individually so a failure doesn't
+                    # rollback all previously queued applications in this batch.
                     try:
-                        await db.flush()
+                        await db.commit()
                     except IntegrityError:
-                        await db.rollback()
-                        logger.warning("Duplicate application detected during flush; skipping", user_id=user.id, job_id=job.id)
+                        logger.warning("Duplicate application detected; skipping", user_id=user.id, job_id=job.id)
                         queued -= 1
                         queued_job_ids.discard(job.id)
                         continue
+
                     # Run full auto-apply using the bot
                     try:
                         from app.agents.apply_bot import ApplyBot

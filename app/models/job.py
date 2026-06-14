@@ -27,6 +27,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
+from app.models.enums import ExperienceLevel
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -55,15 +56,6 @@ class WorkMode(str, enum.Enum):
     ONSITE = "ONSITE"
     HYBRID = "HYBRID"
     UNKNOWN = "UNKNOWN"
-
-
-class ExperienceLevel(str, enum.Enum):
-    ENTRY = "ENTRY"
-    MID = "MID"
-    SENIOR = "SENIOR"
-    LEAD = "LEAD"
-    UNKNOWN = "UNKNOWN"
-    EXECUTIVE = "EXECUTIVE"
 
 
 class JobStatus(str, enum.Enum):
@@ -146,7 +138,10 @@ class Job(Base, UUIDMixin, TimestampMixin):
 
     # ── Pipeline Status ───────────────────────────────────────
     status: Mapped[JobStatus] = mapped_column(
-        String(20), default=JobStatus.NEW.value, nullable=False, index=True
+        Enum(JobStatus, name="jobstatus", values_callable=lambda obj: [e.value for e in obj]),
+        default=JobStatus.NEW,
+        nullable=False,
+        index=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 

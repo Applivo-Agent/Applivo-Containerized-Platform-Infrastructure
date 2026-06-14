@@ -14,16 +14,19 @@ from pathlib import Path
 
 import structlog
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+from playwright_stealth import stealth_async
 from app.services.cookie_service import cookie_service
 
 logger = structlog.get_logger()
 
 
 def _browser_headless() -> bool:
+    """Always run headless for server-side login — stealth handles detection."""
     headless_env = os.environ.get("INTERNSHALA_HEADLESS") or os.environ.get("BROWSER_HEADLESS")
     if headless_env is not None:
         return headless_env.strip().lower() in ("1", "true", "yes", "on")
-    return not bool(os.environ.get("DISPLAY"))
+    # Default to headless; the container has no X11 and stealth patches hide automation
+    return True
 
 
 class InternshalaLoginService:
@@ -122,7 +125,7 @@ class InternshalaLoginService:
                     pass
 
             # If persistent user-data dir requested, use launch_persistent_context
-            persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR")
+            persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
             if persistent_dir:
                 # ensure dir exists
                 try:
@@ -156,6 +159,7 @@ class InternshalaLoginService:
             })
             
             page = await context.new_page()
+            await stealth_async(page)
             # Event set when a network response indicates successful auth (XHR or Set-Cookie)
             auth_event = asyncio.Event()
 
@@ -280,7 +284,10 @@ class InternshalaLoginService:
             except Exception:
                 pass
             
-            await browser.close()
+            if browser:
+                await browser.close()
+            elif context:
+                await context.close()
             await playwright.stop()
             
             return cookies
@@ -375,11 +382,12 @@ class InternshalaLoginService:
                 return True
 
             # Session/auth cookies often appear before UI updates.
+            # NOTE: PHPSESSID is set for anonymous users too — do NOT treat it as auth.
             try:
                 cookies = await page.context.cookies()
-                auth_cookie_markers = ("session", "auth", "token", "user", "login")
+                auth_cookie_names = {"isc", "ists", "internshala_user", "is_registered"}
                 has_auth_cookie = any(
-                    c.get("domain") and "internshala.com" in c["domain"] and any(m in c.get("name", "").lower() for m in auth_cookie_markers)
+                    c.get("domain") and "internshala.com" in c["domain"] and c.get("name", "").lower() in auth_cookie_names
                     for c in cookies
                 )
                 if has_auth_cookie:

@@ -47,6 +47,44 @@ security = HTTPBearer(auto_error=False)
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
+def _smtp_configured() -> bool:
+    return bool((settings.SMTP_USERNAME or "").strip() and (settings.SMTP_PASSWORD or "").strip())
+
+
+async def _deliver_otp_email(
+    *,
+    email: str,
+    otp: str,
+    subject: str,
+    body: str,
+    flow: str,
+) -> None:
+    """
+    Send OTP via SMTP when configured. In development, log OTP to server logs
+    if SMTP is missing or delivery fails so local/Docker testing still works.
+    """
+    email_sent = False
+    if _smtp_configured():
+        try:
+            from app.services import email_service
+            purpose_map = {"register": "register", "login": "login", "reset": "reset"}
+            email_sent = await email_service.send_otp(email, otp, purpose_map.get(flow, "verification"))
+        except Exception as e:
+            log.error(f"Failed to send {flow} OTP", error=str(e))
+
+    if email_sent:
+        return
+
+    if settings.APP_ENV == "development":
+        log.info(f"DEV MODE OTP ({flow})", email=email, otp=otp)
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to send verification email. Please try again.",
+    )
+
+
 def _format_plan_prices() -> str:
     starter = PLAN_PRICES.get(PlanTier.STARTER, 0) // 100  # Convert paise to rupees
     pro = PLAN_PRICES.get(PlanTier.PRO, 0) // 100
@@ -65,8 +103,8 @@ def _build_new_user_greeting(full_name: Optional[str]) -> tuple[str, str]:
     premium = PLAN_PRICES.get(PlanTier.PREMIUM, 59900) // 100
     body = (
         f"Hi {full_name or 'there'},\n\n"
-        "Welcome to **Applivo** - we're excited to have you on board! 🎉\n\n"
-        "Applivo is your **AI-powered career co-pilot**, designed to help you discover opportunities, "
+        "Welcome to Applivo - we're excited to have you on board!\n\n"
+        "Applivo is your AI-powered career co-pilot, designed to help you discover opportunities, "
         "manage applications, and land your next role faster - without the repetitive manual work.\n\n"
         "Instead of spending hours searching and applying, Applivo automates the heavy lifting so you can "
         "focus on preparing, improving, and succeeding.\n\n"
@@ -254,18 +292,13 @@ async def register_initiate(data: UserCreate, db: AsyncSession = Depends(get_db)
             detail="Failed to send verification code. Please try again later."
         )
 
-    # Send OTP email
-    try:
-        send_result = await NotificationService().send_email_to_user(
-            subject="Verify your Applivo account 🚀",
-            body=f"Your verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
-            to_email=data.email
-        )
-        if send_result.get("error"):
-            raise RuntimeError(send_result["error"])
-    except Exception as e:
-        log.error("Failed to send registration OTP", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+    await _deliver_otp_email(
+        email=data.email,
+        otp=otp,
+        subject="Verify your Applivo account 🚀",
+        body=f"Your verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
+        flow="registration",
+    )
 
     return AuthResponse(message="Verification code sent to your email", email=data.email)
 
@@ -309,14 +342,12 @@ async def register_verify(
     session.access_token_jti = jti
     await db.commit()
 
-    # Create 7-day free trial for new users
+    # Send beautiful HTML welcome email
     try:
-        from app.services.subscription_service import subscription_service
-        trial_sub = await subscription_service.create_trial_subscription(user.id)
-        if trial_sub:
-            log.info("Trial subscription created for new user", user_id=user.id, sub_id=trial_sub.id)
+        from app.services import email_service
+        await email_service.send_welcome(user.email, user.full_name or user.email)
     except Exception as e:
-        log.warning("Failed to create trial subscription for new user", user_id=user.id, error=str(e))
+        log.warning("Welcome email failed", user_id=user.id, error=str(e))
 
     greeting_subject, greeting_body = _build_new_user_greeting(user.full_name)
     try:
@@ -369,18 +400,13 @@ async def login_initiate(data: LoginRequest, db: AsyncSession = Depends(get_db))
             detail="Failed to send verification code. Please try again later."
         )
 
-    # Send OTP email
-    try:
-        send_result = await NotificationService().send_email_to_user(
-            subject="Your Applivo Login Code 🔑",
-            body=f"Your login verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
-            to_email=data.email
-        )
-        if send_result.get("error"):
-            raise RuntimeError(send_result["error"])
-    except Exception as e:
-        log.error("Failed to send login OTP", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+    await _deliver_otp_email(
+        email=data.email,
+        otp=otp,
+        subject="Your Applivo Login Code 🔑",
+        body=f"Your login verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
+        flow="login",
+    )
 
     return AuthResponse(message="Verification code sent to your email", email=data.email)
 
@@ -442,17 +468,13 @@ async def resend_otp(email: str, purpose: Literal["login", "register"], db: Asyn
     otp = otp_service.generate_otp()
     await otp_service.store_otp(email, purpose, otp)
     
-    try:
-        send_result = await NotificationService().send_email_to_user(
-            subject=f"Your Applivo {'Registration' if purpose == 'register' else 'Login'} Code",
-            body=f"Your verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
-            to_email=email
-        )
-        if send_result.get("error"):
-            raise RuntimeError(send_result["error"])
-    except Exception as e:
-        log.error("Failed to resend OTP", email=email, error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to send verification email.")
+    await _deliver_otp_email(
+        email=email,
+        otp=otp,
+        subject=f"Your Applivo {'Registration' if purpose == 'register' else 'Login'} Code",
+        body=f"Your verification code is: {otp}\n\nThis code will expire in {settings.OTP_EXPIRE_MINUTES} minutes.",
+        flow=f"resend_{purpose}",
+    )
 
     return AuthResponse(message="A new verification code has been sent", email=email)
 

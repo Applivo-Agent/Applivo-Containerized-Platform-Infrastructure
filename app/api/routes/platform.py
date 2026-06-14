@@ -222,6 +222,102 @@ async def invalidate_platform(
     return {"invalidated": True, "platform": platform}
 
 
+@router.post("/test-connection/{platform}")
+async def test_platform_connection(
+    platform: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Test whether stored platform cookies are valid and the session is active.
+    Returns detailed diagnostics to help debug connection issues.
+    """
+    from app.services.cookie_service import cookie_service
+    
+    # 1. Check if cookies exist
+    validation = await cookie_service.validate_cookies(current_user.id, platform)
+    if not validation["valid"]:
+        return {
+            "connected": False,
+            "platform": platform,
+            "reason": validation["reason"],
+            "diagnostics": {
+                "cookies_exist": False,
+                "login_tested": False,
+                "recommendation": "Please connect your account via the dashboard Settings → Connect Accounts page.",
+            },
+        }
+    
+    # 2. Try a lightweight browser check (Internshala only for now)
+    if platform == "internshala":
+        try:
+            from playwright.async_api import async_playwright
+            cookies = await cookie_service.get_cookies(current_user.id, platform)
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+                context = await browser.new_context()
+                if cookies and isinstance(cookies, list):
+                    await context.add_cookies(cookies)
+                
+                page = await context.new_page()
+                await page.goto("https://internshala.com/student/dashboard", timeout=30000)
+                
+                # Check if we're actually on the dashboard (logged in)
+                url = page.url
+                has_login_form = await page.query_selector("input[type='password']") is not None
+                has_dashboard = "dashboard" in url or await page.query_selector(".dashboard-container") is not None
+                
+                await browser.close()
+                
+                if has_dashboard and not has_login_form:
+                    return {
+                        "connected": True,
+                        "platform": platform,
+                        "reason": "Session is active and valid",
+                        "diagnostics": {
+                            "cookies_exist": True,
+                            "login_tested": True,
+                            "page_url": url,
+                            "has_dashboard": True,
+                        },
+                    }
+                else:
+                    # Mark cookies invalid since they failed the real test
+                    await cookie_service.invalidate_cookies(current_user.id, platform)
+                    return {
+                        "connected": False,
+                        "platform": platform,
+                        "reason": "Session expired or blocked (redirected to login)",
+                        "diagnostics": {
+                            "cookies_exist": True,
+                            "login_tested": True,
+                            "page_url": url,
+                            "has_dashboard": False,
+                            "has_login_form": has_login_form,
+                            "recommendation": "Please re-upload your cookies or use the login form to reconnect.",
+                        },
+                    }
+        except Exception as e:
+            return {
+                "connected": False,
+                "platform": platform,
+                "reason": f"Browser test failed: {str(e)[:200]}",
+                "diagnostics": {
+                    "cookies_exist": True,
+                    "login_tested": False,
+                    "error": str(e)[:500],
+                },
+            }
+    
+    # For unsupported platforms, just return cookie validation result
+    return {
+        "connected": validation["valid"],
+        "platform": platform,
+        "reason": validation.get("reason", "Unknown"),
+        "diagnostics": {"cookies_exist": validation["valid"]},
+    }
+
+
 @router.post("/scan/messages/{platform}")
 async def trigger_message_scan(
     platform: str = "internshala",

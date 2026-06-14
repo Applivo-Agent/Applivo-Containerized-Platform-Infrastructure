@@ -1,4 +1,5 @@
 "use client";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi, applicationsApi } from "@/lib/api";
 import { useSubscription } from "@/lib/subscription";
@@ -9,6 +10,11 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 export default function AnalyticsPage() {
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const { isPro, isPremium } = useSubscription();
 
   const { data: dashboard } = useQuery({
@@ -146,53 +152,57 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <div className="h-[220px] md:h-[250px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorApplied" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#ffffff" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorInterviews" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#a1a1aa" stopOpacity={0.12}/>
-                    <stop offset="95%" stopColor="#a1a1aa" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
-                <XAxis dataKey="name" stroke="#a1a1aa" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} />
-                <YAxis stroke="#a1a1aa" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1c1c1e', border: '1px solid #27272a', borderRadius: '0.75rem', fontSize: '11px', fontWeight: 'bold', color: '#ffffff' }}
-                  formatter={(value, name) => {
-                    const v = Number(value ?? 0);
-                    const n = String(name ?? "");
-                    if (n === "applied") return [v, "Applied"];
-                    if (n === "interviews") return [v, "Interviews"];
-                    return [v, n];
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="applied"
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorApplied)"
-                  dot={{ r: 2 }}
-                  activeDot={{ r: 5 }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="interviews"
-                  stroke="#a1a1aa"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorInterviews)"
-                  dot={{ r: 2 }}
-                  activeDot={{ r: 4 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {isMounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorApplied" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#ffffff" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorInterviews" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#a1a1aa" stopOpacity={0.12}/>
+                      <stop offset="95%" stopColor="#a1a1aa" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                  <XAxis dataKey="name" stroke="#a1a1aa" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} />
+                  <YAxis stroke="#a1a1aa" fontSize={10} fontWeight="bold" tickLine={false} axisLine={false} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1c1c1e', border: '1px solid #27272a', borderRadius: '0.75rem', fontSize: '11px', fontWeight: 'bold', color: '#ffffff' }}
+                    formatter={(value, name) => {
+                      const v = Number(value ?? 0);
+                      const n = String(name ?? "");
+                      if (n === "applied") return [v, "Applied"];
+                      if (n === "interviews") return [v, "Interviews"];
+                      return [v, n];
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="applied"
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#colorApplied)"
+                    dot={{ r: 2 }}
+                    activeDot={{ r: 5 }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="interviews"
+                    stroke="#a1a1aa"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorInterviews)"
+                    dot={{ r: 2 }}
+                    activeDot={{ r: 4 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="w-full h-full bg-[#161616] animate-pulse rounded-lg border border-zinc-800" />
+            )}
           </div>
         </div>
       </div>

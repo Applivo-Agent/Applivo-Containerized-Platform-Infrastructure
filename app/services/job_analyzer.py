@@ -26,32 +26,39 @@ from app.core.database import get_db_context
 from app.models.job import Job, JobAnalysis, JobStatus
 from app.models.user import User, UserSkill, UserProfile
 from app.services.ai_router import ai_router
+from app.services.analyze_budget_service import analyze_budget_service
 
 logger = structlog.get_logger()
 
-BATCH_SIZE = 5
-MAX_TOKENS_PER_JOB = 220
+BATCH_SIZE = 10
+MAX_TOKENS_PER_JOB = 180
 
-ANALYSIS_SYSTEM_PROMPT = """
-You are an expert technical recruiter. Analyze ONLY job title + metadata (no full description) and return ONLY valid JSON.
-Process up to 5 jobs at once. Return a JSON ARRAY with results for each job.
-Each job result must have exactly these fields:
-{
-  "job_index": 0,
-  "required_skills": ["skill1", "skill2"],
-  "preferred_skills": ["skill3"],
-  "tech_stack": ["Python", "PyTorch"],
-  "ats_keywords": ["keyword1", "keyword2"],
-  "min_years_experience": 0,
-  "education_requirement": "bachelor|master|phd|none",
-  "key_responsibilities": ["responsibility1"],
-  "role_category": "computer_vision|nlp|mlops|data_science|software_engineering|other",
-  "seniority_detected": "entry|mid|senior|lead",
-  "is_internship": true,
-  "job_difficulty": "easy|medium|hard",
-  "ai_summary": "2-sentence summary"
+# Short keys used in the LLM prompt mapped back to long DB field names
+_ANALYSIS_KEY_MAP = {
+    "ji": "job_index",
+    "req": "required_skills",
+    "pref": "preferred_skills",
+    "stack": "tech_stack",
+    "ats": "ats_keywords",
+    "yoe": "min_years_experience",
+    "edu": "education_requirement",
+    "resp": "key_responsibilities",
+    "cat": "role_category",
+    "sen": "seniority_detected",
+    "int": "is_internship",
+    "diff": "job_difficulty",
+    "sum": "ai_summary",
 }
-"""
+
+ANALYSIS_SYSTEM_PROMPT = (
+    "Return a compact JSON array (no markdown, minimal whitespace) analyzing each job. "
+    "Use short keys: ji=job_index, req=required_skills[], pref=preferred_skills[], "
+    "stack=tech_stack[], ats=ats_keywords[], yoe=min_years_experience, "
+    "edu=education_requirement, resp=key_responsibilities[], cat=role_category, "
+    "sen=seniority_detected, int=is_internship, diff=job_difficulty, sum=ai_summary. "
+    "cat in cv/nlp/mlops/ds/se/other. sen in entry/mid/senior/lead. diff in e/m/h. "
+    "sum: 1 sentence only."
+)
 
 
 class JobAnalyzerService:
@@ -168,7 +175,7 @@ class JobAnalyzerService:
             return {"job_id": job_id, "match_score": match_data.get("match_score")}
 
     async def analyze_new_batch(self) -> dict:
-        """Analyze all NEW jobs using batched approach."""
+        """Analyze all NEW jobs using batched approach with per-user token budgets."""
         async with get_db_context() as db:
             result = await db.execute(
                 select(Job).where(Job.status == JobStatus.NEW).limit(100)
@@ -176,28 +183,63 @@ class JobAnalyzerService:
             new_jobs = result.scalars().all()
 
         if not new_jobs:
-            return {"analyzed": 0, "total_new": 0, "batches": 0}
+            return {"analyzed": 0, "total_new": 0, "batches": 0, "tokens_used": 0, "budget_exhausted": False}
 
-        jobs_list = list(new_jobs)
-        analyzed = 0
-        batch_count = 0
+        # Group jobs by user_id so each user's analysis consumes their own token budget
+        from collections import defaultdict
+        jobs_by_user: dict[Optional[str], list[Job]] = defaultdict(list)
+        for job in new_jobs:
+            jobs_by_user[job.user_id].append(job)
 
-        for i in range(0, len(jobs_list), BATCH_SIZE):
-            batch = jobs_list[i:i + BATCH_SIZE]
-            batch_count += 1
+        total_analyzed = 0
+        total_batches = 0
+        total_tokens = 0
+        budget_exhausted = False
+        budget_reasons: list[str] = []
+
+        for user_id, user_jobs in jobs_by_user.items():
+            if user_id is None:
+                logger.warning("Skipping analysis for jobs without an owner", count=len(user_jobs))
+                continue
+
             try:
-                # Grouping by user_id to ensure correct tracking for AIRouter
-                # Since we process 5 at a time, we just use the user_id of the first job in batch
-                current_user_id = batch[0].user_id if batch else None
-                results = await self._analyze_batch(batch, user_id=current_user_id)
-                for job, analysis in zip(batch, results):
-                    if analysis:
-                        await self._save_analysis(job, analysis)
-                        analyzed += 1
+                budget = await analyze_budget_service.get_analyze_budget(user_id)
             except Exception as e:
-                logger.error("Batch analysis failed", batch=i//BATCH_SIZE, error=str(e))
+                logger.warning("Failed to get analyze budget, skipping user", user_id=user_id, error=str(e))
+                continue
 
-        return {"analyzed": analyzed, "total_new": len(jobs_list), "batches": batch_count}
+            if not budget.get("allowed"):
+                budget_exhausted = True
+                reason = budget.get("reason") or "Analyze token budget exhausted"
+                budget_reasons.append(reason)
+                logger.info("Skipping analyze batch for user due to budget", user_id=user_id, reason=reason)
+                continue
+
+            run_limit = None if budget.get("is_unlimited") else int(budget.get("run_limit_tokens", 0))
+            monthly_remaining = None if budget.get("is_unlimited") else int(budget.get("remaining_month_tokens", 0))
+
+            res = await self.analyze_user_new_or_unanalyzed(
+                user_id=user_id,
+                limit=len(user_jobs),
+                max_run_tokens=run_limit,
+                max_month_tokens_remaining=monthly_remaining,
+            )
+            total_analyzed += res.get("analyzed", 0)
+            total_batches += res.get("batches", 0)
+            total_tokens += res.get("tokens_used", 0)
+            if res.get("budget_exhausted"):
+                budget_exhausted = True
+                if res.get("budget_reason"):
+                    budget_reasons.append(res["budget_reason"])
+
+        return {
+            "analyzed": total_analyzed,
+            "total_new": len(new_jobs),
+            "batches": total_batches,
+            "tokens_used": total_tokens,
+            "budget_exhausted": budget_exhausted,
+            "budget_reason": budget_reasons[0] if budget_reasons else None,
+        }
 
     async def _analyze_single(self, job: Job) -> dict:
         """Analyze a single job description."""
@@ -218,14 +260,14 @@ class JobAnalyzerService:
         
         for idx, job in enumerate(jobs):
             jobs_content.append(
-                "\n".join([
-                    f"---JOB {idx}---",
-                    f"Title: {job.title or ''}",
-                    f"Company: {job.company_name or ''}",
-                    f"Location: {job.location or job.city or ''}",
-                    f"Job Type: {job.job_type or ''}",
-                    f"Work Mode: {job.work_mode or ''}",
-                    f"Experience Level: {job.experience_level or ''}",
+                "|".join([
+                    str(idx),
+                    job.title or "",
+                    job.company_name or "",
+                    job.location or job.city or "",
+                    str(job.job_type or ""),
+                    str(job.work_mode or ""),
+                    str(job.experience_level or ""),
                 ])
             )
 
@@ -233,7 +275,9 @@ class JobAnalyzerService:
         max_tokens = MAX_TOKENS_PER_JOB * len(jobs)
 
         try:
-            # Use AI router for dual-provider support (Groq + Gemini fallback)
+            # Use AI router with user settings injection
+            from app.services.ai_router import AIRouter
+            ai_settings = await AIRouter.load_user_ai_settings(user_id) if user_id else None
             result = await ai_router.chat_completions_create(
                 messages=[
                     {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
@@ -244,6 +288,7 @@ class JobAnalyzerService:
                 temperature=0.1,
                 user_id=user_id,
                 endpoint="/api/agent/analyze",
+                ai_settings=ai_settings,
             )
             
             content = result["content"]
@@ -262,6 +307,7 @@ class JobAnalyzerService:
                 results.append(self._empty_analysis())
             
             for r in results:
+                self._normalize_analysis_keys(r)
                 r["model_used"] = settings.OPENAI_MODEL_LIGHT
                 r["ai_provider"] = provider
                 r["tokens_used"] = tokens_used // len(jobs)
@@ -342,13 +388,21 @@ class JobAnalyzerService:
             return "Low match score. Skip unless no other options."
 
     async def _save_analysis(self, job: Job, analysis: dict):
-        """Save analysis results to database."""
+        """Save analysis results to database using the job owner's profile/skills."""
         async with get_db_context() as db:
-            profile_result = await db.execute(select(UserProfile).limit(1))
-            profile = profile_result.scalar_one_or_none()
-            
-            skills_result = await db.execute(select(UserSkill).limit(1000))
-            skills = skills_result.scalars().all()
+            if job.user_id:
+                profile_result = await db.execute(
+                    select(UserProfile).where(UserProfile.user_id == job.user_id)
+                )
+                profile = profile_result.scalar_one_or_none()
+
+                skills_result = await db.execute(
+                    select(UserSkill).where(UserSkill.user_id == job.user_id)
+                )
+                skills = skills_result.scalars().all()
+            else:
+                profile = None
+                skills = []
             
             match_data = self._rule_based_match(analysis, profile, skills)
             
@@ -408,6 +462,15 @@ class JobAnalyzerService:
             pass
             
         raise ValueError("Could not extract valid JSON from content")
+
+    def _normalize_analysis_keys(self, result: dict) -> dict:
+        """Map short LLM keys back to long DB field names. Keeps existing long keys as-is."""
+        if not isinstance(result, dict):
+            return result
+        for short_key, long_key in _ANALYSIS_KEY_MAP.items():
+            if short_key in result and long_key not in result:
+                result[long_key] = result.pop(short_key)
+        return result
 
     def _empty_analysis(self) -> dict:
         return {

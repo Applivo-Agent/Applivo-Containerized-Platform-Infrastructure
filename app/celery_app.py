@@ -86,4 +86,33 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.reset_all_monthly_credits",
         "schedule": crontab(hour=0, minute=0, day_of_month=1),
     },
+    # ── Lifecycle emails ───────────────────────────────────────────────────────
+    "send-trial-expired-emails": {
+        "task": "app.celery_tasks.send_trial_expired_emails",
+        "schedule": crontab(hour=10, minute=0),
+    },
+    "send-reengagement-emails": {
+        "task": "app.celery_tasks.send_reengagement_emails",
+        "schedule": crontab(hour=11, minute=0, day_of_week="1"),  # every Monday
+    },
+    "send-profile-incomplete-reminders": {
+        "task": "app.celery_tasks.send_profile_incomplete_reminders",
+        "schedule": crontab(hour=10, minute=30),
+    },
+    "send-weekly-agent-report": {
+        "task": "app.celery_tasks.send_weekly_agent_report",
+        "schedule": crontab(hour=8, minute=0, day_of_week="1"),  # Monday 8am
+    },
+    "send-trial-day3-emails": {
+        "task": "app.celery_tasks.send_trial_day3_emails",
+        "schedule": crontab(hour=10, minute=15),
+    },
+    "send-application-aging-alerts": {
+        "task": "app.celery_tasks.send_application_aging_alerts",
+        "schedule": crontab(hour=11, minute=30),
+    },
+    "send-monthly-career-reports": {
+        "task": "app.celery_tasks.send_monthly_career_reports",
+        "schedule": crontab(hour=9, minute=0, day_of_month=1),
+    },
 }

@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+logger = structlog.get_logger()
 
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
@@ -187,11 +190,23 @@ async def activate_free_plan(
 async def cancel_subscription(
     current_user: User = Depends(get_current_user),
 ):
-    """Cancel the user's active subscription."""
-    sub = await subscription_service.cancel_subscription(current_user.id)
-    if not sub:
+    """Cancel the user's active subscription (including Razorpay autopay if linked)."""
+    from app.services.payment_service import payment_service
+
+    active = await subscription_service.get_active_subscription(current_user.id)
+    if not active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active subscription found",
         )
+
+    # Cancel Razorpay subscription if one exists (best-effort, don't block on failure)
+    if active.razorpay_subscription_id:
+        try:
+            await payment_service.cancel_razorpay_subscription(active.razorpay_subscription_id)
+        except Exception as e:
+            logger.warning("Failed to cancel Razorpay subscription", error=str(e),
+                           razorpay_id=active.razorpay_subscription_id)
+
+    sub = await subscription_service.cancel_subscription(current_user.id)
     return {"message": "Subscription cancelled", "subscription_id": sub.id}

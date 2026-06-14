@@ -240,14 +240,14 @@ export default function JobsPage() {
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mt-4 text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
                   <span className="bg-[#1c1c1e] px-2.5 py-1 rounded-full border border-zinc-800">{job.work_mode}</span>
                   {job.job_type && <span className="bg-[#1c1c1e] px-2.5 py-1 rounded-full border border-zinc-800">{job.job_type.replace("_", " ")}</span>}
-                  {job.posted_at && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeAgo(job.posted_at)}</span>}
+                  {!!job.posted_at && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeAgo(job.posted_at)}</span>}
                   {(job.salary_min || job.salary_max) && (
                     <span className="text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-full font-black">₹{job.salary_min ?? "?"} – {job.salary_max ?? "?"}K</span>
                   )}
                 </div>
 
                 {job.analysis?.ai_summary && (
-                  <p className="text-xs text-zinc-400 mt-3 line-clamp-2 italic font-serif leading-relaxed">"{job.analysis.ai_summary}"</p>
+                  <p className="text-xs text-zinc-500 mt-3 line-clamp-2 leading-relaxed">{job.analysis.ai_summary}</p>
                 )}
               </div>
 

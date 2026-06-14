@@ -18,8 +18,14 @@ depends_on = None
 
 def upgrade() -> None:
     # Add new enum values for TRIAL and TRIAL_EXPIRED
-    op.execute("ALTER TYPE subscriptionstatus ADD VALUE IF NOT EXISTS 'TRIAL'")
-    op.execute("ALTER TYPE subscriptionstatus ADD VALUE IF NOT EXISTS 'TRIAL_EXPIRED'")
+    # NOTE: Some deployments use VARCHAR instead of native ENUM, so we guard the ALTER.
+    conn = op.get_bind()
+    result = conn.execute(sa.text("""
+        SELECT 1 FROM pg_type WHERE typname = 'subscriptionstatus'
+    """))
+    if result.scalar() is not None:
+        op.execute("ALTER TYPE subscriptionstatus ADD VALUE IF NOT EXISTS 'TRIAL'")
+        op.execute("ALTER TYPE subscriptionstatus ADD VALUE IF NOT EXISTS 'TRIAL_EXPIRED'")
     
     # Add is_trial column
     op.add_column('subscriptions', sa.Column('is_trial', sa.Boolean(), nullable=False, server_default=sa.false()))

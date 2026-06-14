@@ -353,44 +353,39 @@ class ApplyBot:
 
         try:
             from playwright.async_api import async_playwright
+            from playwright_stealth import stealth_async
 
             async with async_playwright() as p:
                 import os
-                persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR")
+                persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
                 import random as _rand
                 _chrome_ver = _rand.choice(["122", "123", "124"])
                 _ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_chrome_ver}.0.0.0 Safari/537.36"
                 _w, _h = _rand.choice([(1366, 768), (1440, 900), (1536, 864), (1920, 1080)])
                 launch_args = [
                     "--no-sandbox",
-                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-infobars",
-                    "--disable-web-security",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-gpu",
-                    f"--window-size={_w},{_h}",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--no-first-run",
-                    "--password-store=basic",
-                    "--use-mock-keychain",
-                    f"--user-agent={_ua}",
+                    "--disable-dev-shm-usage",
+                    "--window-size=1366,768",
+                    "--start-maximized",
+                    "--lang=en-IN",
+                    "--accept-lang=en-IN,en;q=0.9",
                 ]
                 context_kwargs = dict(
-                    user_agent=_ua,
-                    viewport={"width": _w, "height": _h},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    viewport={"width": 1366, "height": 768},
                     locale="en-IN",
                     timezone_id="Asia/Kolkata",
-                    permissions=["geolocation", "notifications"],
-                    geolocation={"latitude": 12.9716 + _rand.uniform(-0.05, 0.05), "longitude": 77.5946 + _rand.uniform(-0.05, 0.05)},
-                    accept_downloads=True,
+                    geolocation={"latitude": 12.9716, "longitude": 77.5946},
+                    permissions=["geolocation"],
+                    color_scheme="light",
+                    java_script_enabled=True,
                     extra_http_headers={
-                        "Accept-Language": "en-IN,en-GB;q=0.9,en;q=0.8",
-                        "sec-ch-ua": f'"Chromium";v="{_chrome_ver}", "Google Chrome";v="{_chrome_ver}", "Not-A.Brand";v="99"',
-                        "sec-ch-ua-mobile": "?0",
-                        "sec-ch-ua-platform": '"Windows"',
+                        "Accept-Language": "en-IN,en;q=0.9",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "DNT": "1",
                     },
                 )
                 # Add proxy only when explicitly configured. Do not fall back to
@@ -423,100 +418,82 @@ class ApplyBot:
                         **context_kwargs,
                     )
                     browser = context.browser
+                    logger.info("Using persistent browser profile", dir=persistent_dir)
                 else:
                     browser = await p.chromium.launch(
                         headless=_browser_headless(),
                         args=launch_args,
                     )
                     context = await browser.new_context(**context_kwargs)
+                    logger.info("Using fresh browser context (no persistent profile)")
                 
                 context.set_default_timeout(60000)
 
-                await context.add_init_script("""
-                    () => {
-                        // 1. Hide webdriver flag
-                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-                        // 2. Realistic plugins
-                        Object.defineProperty(navigator, 'plugins', {
-                            get: () => {
-                                var arr = [
-                                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-                                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
-                                ];
-                                arr.item = function(i) { return arr[i]; };
-                                arr.namedItem = function(n) { return arr.find(function(p) { return p.name === n; }) || null; };
-                                arr.refresh = function() {};
-                                Object.setPrototypeOf(arr, PluginArray.prototype);
-                                return arr;
-                            }
-                        });
-
-                        // 3. Languages
-                        Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-GB', 'en'] });
-
-                        // 4. Full Chrome runtime object
-                        window.chrome = {
-                            app: {
-                                isInstalled: false,
-                                InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-                                RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
-                            },
-                            runtime: {
-                                connect: function() {},
-                                sendMessage: function() {}
-                            },
-                            loadTimes: function() {},
-                            csi: function() {},
-                        };
-
-                        // 5. Hardware concurrency (real machines: 4-16)
-                        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-
-                        // 6. Device memory (real machines: 4-16 GB)
-                        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-
-                        // 7. WebGL — spoof real GPU vendor/renderer
-                        const getParameter = WebGLRenderingContext.prototype.getParameter;
-                        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                            if (parameter === 37445) return 'Intel Inc.';
-                            if (parameter === 37446) return 'Intel(R) UHD Graphics 620';
-                            return getParameter.call(this, parameter);
-                        };
-
-                        // 8. Permissions API — prevent automation detection
-                        const originalQuery = window.navigator.permissions.query;
-                        window.navigator.permissions.query = (parameters) => (
-                            parameters.name === 'notifications'
-                                ? Promise.resolve({ state: Notification.permission })
-                                : originalQuery(parameters)
-                        );
-
-                        // 9. Battery API — real browsers expose this
-                        if (!navigator.getBattery) {
-                            navigator.getBattery = () => Promise.resolve({
-                                charging: true, chargingTime: 0,
-                                dischargingTime: Infinity, level: 1.0
+                # Only add stealth init script for non-persistent contexts
+                # Persistent profiles already have the fingerprint from login
+                if not persistent_dir:
+                    await context.add_init_script("""
+                        () => {
+                            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                            Object.defineProperty(navigator, 'plugins', {
+                                get: () => {
+                                    var arr = [
+                                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                                    ];
+                                    arr.item = function(i) { return arr[i]; };
+                                    arr.namedItem = function(n) { return arr.find(function(p) { return p.name === n; }) || null; };
+                                    arr.refresh = function() {};
+                                    Object.setPrototypeOf(arr, PluginArray.prototype);
+                                    return arr;
+                                }
                             });
-                        }
-
-                        // 10. Screen color/pixel depth
-                        Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
-                        Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
-
-                        // 11. Hide automation in toString
-                        const originalToString = Function.prototype.toString;
-                        Function.prototype.toString = function() {
-                            if (this === window.navigator.permissions.query) {
-                                return 'function query() { [native code] }';
+                            Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-GB', 'en'] });
+                            window.chrome = {
+                                app: {
+                                    isInstalled: false,
+                                    InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                                    RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
+                                },
+                                runtime: { connect: function() {}, sendMessage: function() {} },
+                                loadTimes: function() {},
+                                csi: function() {},
+                            };
+                            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                            const getParameter = WebGLRenderingContext.prototype.getParameter;
+                            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                                if (parameter === 37445) return 'Intel Inc.';
+                                if (parameter === 37446) return 'Intel(R) UHD Graphics 620';
+                                return getParameter.call(this, parameter);
+                            };
+                            const originalQuery = window.navigator.permissions.query;
+                            window.navigator.permissions.query = (parameters) => (
+                                parameters.name === 'notifications'
+                                    ? Promise.resolve({ state: Notification.permission })
+                                    : originalQuery(parameters)
+                            );
+                            if (!navigator.getBattery) {
+                                navigator.getBattery = () => Promise.resolve({
+                                    charging: true, chargingTime: 0,
+                                    dischargingTime: Infinity, level: 1.0
+                                });
                             }
-                            return originalToString.call(this);
-                        };
-                    }
-                """)
+                            Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+                            Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+                            const originalToString = Function.prototype.toString;
+                            Function.prototype.toString = function() {
+                                if (this === window.navigator.permissions.query) {
+                                    return 'function query() { [native code] }';
+                                }
+                                return originalToString.call(this);
+                            };
+                        }
+                    """)
 
                 page = await context.new_page()
+                await stealth_async(page)
 
                 try:
                     ats = self._detect_ats(job.source_url)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hmac
 import hashlib
 import json
-import logging
+import structlog
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ from app.models.subscription import PlanTier, Subscription, SubscriptionStatus
 from app.services.payment_service import payment_service
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
@@ -100,6 +100,42 @@ async def payment_history(
     return {"payments": history}
 
 
+@router.get("/autopay-manage-url")
+async def get_autopay_manage_url(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return Razorpay short_url for completing card setup or managing autopay.
+    Frontend redirects the user to short_url when present.
+    """
+    try:
+        return await payment_service.get_autopay_manage_url(current_user.id)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        )
+
+
+@router.post("/cancel-autopay")
+async def cancel_autopay(
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel Razorpay recurring billing and the local subscription."""
+    try:
+        return await payment_service.cancel_autopay_for_user(current_user.id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        )
+
+
 class StartTrialWithAutoPayRequest(BaseModel):
     plan: str  # "starter"
 
@@ -164,7 +200,12 @@ async def start_trial_with_autopay(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to start trial with autopay", error=str(e), user_id=current_user.id)
+        logger.error(
+            "Failed to start trial with autopay",
+            error=str(e),
+            user_id=current_user.id,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start trial: {str(e)}",
@@ -217,7 +258,61 @@ async def razorpay_webhook(request: Request):
 
     logger.info(f"Razorpay webhook received: {event_type}")
 
-    if event_type == "payment.captured":
+    if event_type == "subscription.authenticated":
+        # User saved their card and paid ₹5 auth charge. Trial has officially started.
+        sub_data = subscription_entity.get("entity", subscription_entity)
+        razorpay_subscription_id = sub_data.get("id")
+
+        logger.info(f"Processing subscription authentication: {razorpay_subscription_id}")
+
+        if razorpay_subscription_id:
+            try:
+                from app.core.database import get_db_context
+                from sqlalchemy import select
+                from app.models.subscription import Subscription, SubscriptionStatus
+                from app.services.notification_service import NotificationService
+                from app.models.user import User
+
+                async with get_db_context() as db:
+                    result = await db.execute(
+                        select(Subscription).where(
+                            Subscription.razorpay_subscription_id == razorpay_subscription_id
+                        )
+                    )
+                    sub = result.scalar_one_or_none()
+                    if sub:
+                        sub.status = SubscriptionStatus.TRIAL
+                        sub.is_trial = True
+                        # trial_end_date is already set in create_razorpay_subscription
+                        await db.commit()
+
+                        # Send "Trial Started" email notification
+                        try:
+                            user_result = await db.execute(select(User).where(User.id == sub.user_id))
+                            user = user_result.scalar_one_or_none()
+                            if user:
+                                trial_end_str = sub.trial_end_date.strftime('%B %d, %Y') if sub.trial_end_date else 'in 7 days'
+                                from app.services import email_service
+                                await email_service.send_trial_started(
+                                    user.email,
+                                    user.full_name or user.email,
+                                    trial_end_str,
+                                )
+                                await NotificationService().notify(
+                                    title="Your 7-Day Free Trial Has Started!",
+                                    body=f"Trial active until {trial_end_str}. Your agent is running.",
+                                    event_type="trial_started",
+                                    data={"plan": sub.plan.value, "trial_end_date": sub.trial_end_date.isoformat() if sub.trial_end_date else None},
+                                    user_id=sub.user_id,
+                                )
+                        except Exception as ne:
+                            logger.warning("Failed to send trial started notification", error=str(ne))
+
+                        logger.info(f"Subscription authenticated: {razorpay_subscription_id}")
+            except Exception as e:
+                logger.error(f"Failed to handle subscription authentication: {e}")
+
+    elif event_type == "payment.captured":
         # Extract from nested 'entity' if present, otherwise direct
         p_data = payment_entity.get("entity", payment_entity)
         o_data = order_entity.get("entity", order_entity)
@@ -275,13 +370,20 @@ async def razorpay_webhook(request: Request):
                             user_result = await db.execute(select(User).where(User.id == sub.user_id))
                             user = user_result.scalar_one_or_none()
                             if user:
+                                try:
+                                    from app.services import email_service as es
+                                    await es.send_subscription_activated(
+                                        user.email,
+                                        user.full_name or user.email,
+                                        sub.plan.value.capitalize(),
+                                        "Auto-billed",
+                                        sub.end_date.strftime('%B %d, %Y'),
+                                    )
+                                except Exception:
+                                    pass
                                 await NotificationService().notify(
-                                    title="🎉 Payment Successful - Subscription Active",
-                                    body=f"""Your {sub.plan.value} plan is now active!
-
-Your subscription is valid until {sub.end_date.strftime('%B %d, %Y')}.
-
-Thank you for subscribing to Applivo!""",
+                                    title="Payment Successful - Subscription Active",
+                                    body=f"Your {sub.plan.value} plan is now active until {sub.end_date.strftime('%B %d, %Y')}.",
                                     event_type="subscription_charged",
                                     data={"plan": sub.plan.value},
                                     user_id=sub.user_id,
@@ -337,13 +439,19 @@ Thank you for subscribing to Applivo!""",
                             user_result = await db.execute(select(User).where(User.id == sub.user_id))
                             user = user_result.scalar_one_or_none()
                             if user:
+                                try:
+                                    from app.services import email_service as es
+                                    await es.send_payment_failed(
+                                        user.email,
+                                        user.full_name or user.email,
+                                        sub.plan.value.capitalize(),
+                                        "72 hours",
+                                    )
+                                except Exception:
+                                    pass
                                 await NotificationService().notify(
-                                    title="⚠️ Payment Failed - Please Update Your Card",
-                                    body=f"""Your payment for the {sub.plan.value} plan failed. 
-
-Your subscription has been paused. Please update your payment method to continue using Applivo.
-
-Visit your account settings to manage your payment method.""",
+                                    title="Payment Failed - Please Update Your Card",
+                                    body=f"Your payment for the {sub.plan.value} plan failed. Update your payment method to continue.",
                                     event_type="subscription_halted",
                                     data={"plan": sub.plan.value},
                                     user_id=sub.user_id,

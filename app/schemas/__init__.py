@@ -430,6 +430,7 @@ class AgentStatusResponse(BaseModel):
     last_run: Optional[datetime] = None
     jobs_found_today: int = 0
     applications_today: int = 0
+    active_workflow: Optional[WorkflowExecutionOut] = None
 
 
 class ManualAgentRunRequest(BaseModel):
@@ -449,6 +450,43 @@ class AgentCycleResponse(BaseModel):
     task_id: str
     status: str
     message: str
+
+
+# ── Workflow Pipeline ─────────────────────────────────────────────────────────
+
+class WorkflowStepOut(BaseModel):
+    id: str
+    step_index: int
+    step_type: str
+    status: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result_summary: Optional[dict] = None
+    error_message: Optional[str] = None
+    tokens_used: Optional[int] = None
+    model_config = {"from_attributes": True}
+
+
+class WorkflowExecutionOut(BaseModel):
+    id: str
+    user_id: str
+    status: str
+    current_step_index: int
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    result_summary: Optional[dict] = None
+    error_message: Optional[str] = None
+    steps: List[WorkflowStepOut] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class WorkflowRunResponse(BaseModel):
+    workflow_id: str
+    status: str
+    message: str = "Workflow started"
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────

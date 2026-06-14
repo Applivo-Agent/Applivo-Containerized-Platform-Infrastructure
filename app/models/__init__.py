@@ -3,6 +3,7 @@ app/models/__init__.py
 Import all models here so Alembic can detect them all.
 """
 from app.core.database import Base  # noqa: F401
+from app.models.user_settings import UserSettings, SettingsAuditLog  # noqa: F401
 from app.models.base import TimestampMixin, UUIDMixin, SoftDeleteMixin  # noqa: F401
 from app.models.user import User, UserProfile, UserSkill, UserSession  # noqa: F401
 from app.models.job import Job, JobAnalysis  # noqa: F401
@@ -23,6 +24,7 @@ from app.models.ai_usage import AIUsageLog  # noqa: F401
 from app.models.chat_message import ChatMessage  # noqa: F401
 
 __all__ = [
+    "UserSettings", "SettingsAuditLog",
     "Base",
     "User", "UserProfile", "UserSkill", "UserSession",
     "Job", "JobAnalysis",

@@ -1,0 +1,243 @@
+# ── Applivo LOCAL DEVELOPMENT Docker Compose ────────────────
+# Usage: docker compose -f docker-compose.dev.yml up -d
+# Features: hot reload, dev ports exposed, local storage mounts
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL Database ────────────────────────────────
+  database:
+    image: postgres:16-alpine
+    container_name: applivo-dev-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: applivo
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: applivo
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U applivo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: applivo-dev-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass devredis123
+    volumes:
+      - redis-dev-data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "devredis123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API Server (DEV MODE with hot reload) ───────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-dev-backend
+    restart: unless-stopped
+    # Dev mode: skip alembic entrypoint (fresh DB is handled by init_db in lifespan).
+    # For migration testing, run `docker compose exec backend alembic upgrade heads` manually.
+    entrypoint: [""]
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+      - ./app:/app/app:ro
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=devredis123
+      - REDIS_URL=redis://:devredis123@redis:6379/0
+      - CELERY_BROKER_URL=redis://:devredis123@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:devredis123@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:devpassword@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:devpassword@database:5432/applivo
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-dev_webhook_secret}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - BROWSER_HEADLESS=true
+      - INTERNShALA_HEADLESS=true
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── Celery Worker (Standard) ──────────────────────────
+  worker-standard:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-dev-worker-std
+    restart: unless-stopped
+    command: ["python", "-m", "celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=debug", "--concurrency=1", "-Q", "default,analysis,notifications,email_monitor,priority"]
+    volumes:
+      - ./storage:/app/storage
+      - ./app:/app/app:ro
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=devredis123
+      - REDIS_URL=redis://:devredis123@redis:6379/0
+      - CELERY_BROKER_URL=redis://:devredis123@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:devredis123@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:devpassword@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:devpassword@database:5432/applivo
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery Worker (Browsing/Scraping) ─────────────────
+  worker-browsing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: applivo-dev-worker-browser
+    restart: unless-stopped
+    command: ["/app/scripts/start_browser_worker.sh"]
+    ports:
+      - "5900:5900"
+    volumes:
+      - ./storage:/app/storage
+      - ./app:/app/app:ro
+      - ./scripts:/app/scripts:ro
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=devredis123
+      - REDIS_URL=redis://:devredis123@redis:6379/0
+      - CELERY_BROKER_URL=redis://:devredis123@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:devredis123@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:devpassword@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:devpassword@database:5432/applivo
+      - BROWSER_HEADLESS=true
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery Beat ────────────────────────────────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-dev-scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=debug", "--schedule=/app/storage/celerybeat-schedule"]
+    volumes:
+      - ./storage:/app/storage
+      - ./app:/app/app:ro
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=devredis123
+      - REDIS_URL=redis://:devredis123@redis:6379/0
+      - CELERY_BROKER_URL=redis://:devredis123@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:devredis123@redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://applivo:devpassword@database:5432/applivo
+      - DATABASE_URL_SYNC=postgresql://applivo:devpassword@database:5432/applivo
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Flower (Celery Monitoring) ─────────────────────────
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.slim
+    container_name: applivo-dev-flower
+    restart: unless-stopped
+    command: >
+      python -m celery -A app.celery_app:celery_app flower --port=5555
+      --basic_auth=admin:devflower123
+    ports:
+      - "5555:5555"
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=devredis123
+      - REDIS_URL=redis://:devredis123@redis:6379/0
+      - CELERY_BROKER_URL=redis://:devredis123@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:devredis123@redis:6379/1
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-dev-data:
+    driver: local
+  redis-dev-data:
+    driver: local

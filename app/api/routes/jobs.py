@@ -163,9 +163,9 @@ async def trigger_scrape(
         notes = []
 
         if effective_source_lower in ("internshala", "all"):
-            from app.agents.scrapers.internshala import IntershalaScraper
+            from app.agents.scrapers.internshala import InternshalaScraper
             # Pass user_id so jobs are stored under this user's account
-            result = await IntershalaScraper(user_id=current_user.id).run()
+            result = await InternshalaScraper(user_id=current_user.id).run()
             jobs_found = result.get("jobs_found", 0)
             jobs_new = result.get("jobs_new", 0)
             jobs_duplicate = result.get("jobs_duplicate", 0)

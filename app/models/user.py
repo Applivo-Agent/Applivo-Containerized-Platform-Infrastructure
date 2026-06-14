@@ -28,16 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import SoftDeleteMixin, TimestampMixin, UUIDMixin
 
-import enum
-
-
-class ExperienceLevel(str, enum.Enum):
-    ENTRY = "entry"
-    MID = "mid"
-    SENIOR = "senior"
-    LEAD = "lead"
-    EXECUTIVE = "executive"
-    UNKNOWN = "unknown"
+from app.models.enums import ExperienceLevel
 
 
 class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -89,6 +80,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     platform_cookies: Mapped[List["PlatformCookie"]] = relationship(
         "PlatformCookie", back_populates="user", cascade="all, delete-orphan"
+    )
+    settings: Mapped[Optional["UserSettings"]] = relationship(
+        "UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
