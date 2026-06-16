@@ -29,6 +29,33 @@ def _browser_headless() -> bool:
     return True
 
 
+# Browser fingerprint config (must match apply_bot.py exactly)
+import random as _rand
+_CHROME_VER = _rand.choice(["122", "123", "124", "125", "126"])
+_USER_AGENT = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_CHROME_VER}.0.0.0 Safari/537.36"
+_W, _H = _rand.choice([(1366, 768), (1440, 900), (1536, 864), (1920, 1080)])
+
+__LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-infobars",
+    "--start-maximized",
+    "--disable-web-security",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-gpu",
+]
+
+__CONTEXT_KWARGS = dict(
+    user_agent=_USER_AGENT,
+    viewport={"width": _W, "height": _H},
+    locale="en-IN",
+    timezone_id="Asia/Kolkata",
+    permissions=["geolocation"],
+    geolocation={"latitude": 12.9716, "longitude": 77.5946},
+    accept_downloads=True,
+)
+
 class InternshalaLoginService:
     """Service to log into Internshala and capture session cookies."""
 
@@ -84,16 +111,12 @@ class InternshalaLoginService:
             proxy_pass = os.environ.get("INTERNSHALA_PROXY_PASSWORD")
             headless = _browser_headless()
 
-            launch_args = [
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--start-maximized",
+            launch_args = __LAUNCH_ARGS.copy()
+            launch_args.extend([
                 "--disable-web-security",
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--disable-gpu",
-            ]
+            ])
 
             proxy = None
             if proxy_server:
@@ -103,17 +126,14 @@ class InternshalaLoginService:
                 if proxy_pass:
                     proxy["password"] = proxy_pass
 
-            # Optionally use a persisted storage_state to avoid re-login from trusted session
+            # Use shared context kwargs
+            context_kwargs = __CONTEXT_KWARGS.copy()
+            context_kwargs["accept_downloads"] = True
+            if proxy:
+                context_kwargs["proxy"] = proxy
+
+            # Optionally use a persisted storage_state
             storage_state_path = os.environ.get("INTERNSHALA_STORAGE_STATE_PATH")
-            context_kwargs = dict(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1440, "height": 900},
-                locale="en-US",
-                timezone_id="Asia/Kolkata",
-                permissions=["geolocation"],
-                geolocation={"latitude": 12.9716, "longitude": 77.5946},
-                accept_downloads=True,
-            )
 
             if storage_state_path:
                 try:
@@ -160,6 +180,43 @@ class InternshalaLoginService:
             
             page = await context.new_page()
             await stealth_async(page)
+            # Apply shared stealth script for consistent fingerprinting
+            await page.add_init_script("""
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    Object.defineProperty(navigator, 'connection', {
+        get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
+    });
+    delete navigator.__proto__.webdriver;
+    window.chrome = {
+        app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false },
+        runtime: {
+            connect: () => ({}),
+            sendMessage: () => {},
+            id: 'nkbihfbeogaeaoehlefnkodbefgpgknn',
+        },
+        loadTimes: () => ({ firstPaintTime: 0, requestTime: Date.now()/1000 }),
+        csi: () => ({ startE: Date.now(), onloadT: Date.now() + 300 }),
+    };
+    const getParamProto = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) return 'Intel Inc.';
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+        return getParamProto.apply(this, [parameter]);
+    };
+    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+    if (originalQuery) {
+        window.navigator.permissions.query = (parameters) =>
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+    }
+    delete window.__playwright;
+    delete window.__pw_manual;
+""")
             # Event set when a network response indicates successful auth (XHR or Set-Cookie)
             auth_event = asyncio.Event()
 

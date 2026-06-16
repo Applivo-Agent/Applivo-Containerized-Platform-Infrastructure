@@ -30,6 +30,82 @@ from app.agents.apply_bot_internshala import apply_internshala
 
 logger = structlog.get_logger()
 
+# ── Context-level stealth script (applied to ALL pages, persistent or fresh) ──
+STEALTH_SCRIPT = """
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    Object.defineProperty(navigator, 'connection', {
+        get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
+    });
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+            var arr = [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1 },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1 },
+                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2 },
+            ];
+            arr.item = function(i) { return arr[i]; };
+            arr.namedItem = function(n) { return arr.find(function(p) { return p.name === n; }) || null; };
+            arr.refresh = function() {};
+            return arr;
+        }
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {
+        get: () => {
+            var arr = [
+                { type: 'application/pdf', suffixes: 'pdf', description: 'PDF', enabledPlugin: null },
+                { type: 'application/x-nacl', suffixes: '', description: 'Native Client', enabledPlugin: null },
+            ];
+            arr.item = function(i) { return arr[i]; };
+            arr.namedItem = function(n) { return arr.find(function(m) { return m.type === n; }) || null; };
+            return arr;
+        }
+    });
+    delete navigator.__proto__.webdriver;
+    window.chrome = {
+        app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false },
+        runtime: {
+            connect: () => ({}),
+            sendMessage: () => {},
+            id: 'nkbihfbeogaeaoehlefnkodbefgpgknn',
+        },
+        loadTimes: () => ({ firstPaintTime: 0, requestTime: Date.now()/1000 }),
+        csi: () => ({ startE: Date.now(), onloadT: Date.now() + 300 }),
+    };
+    const getParamProto = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) return 'Intel Inc.';
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+        return getParamProto.apply(this, [parameter]);
+    };
+    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+    if (originalQuery) {
+        window.navigator.permissions.query = (parameters) =>
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+    }
+    if (!navigator.getBattery) {
+        navigator.getBattery = () => Promise.resolve({
+            charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0
+        });
+    }
+    Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+    Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+    const originalToString = Function.prototype.toString;
+    Function.prototype.toString = function() {
+        if (this === window.navigator.permissions.query) {
+            return 'function query() { [native code] }';
+        }
+        return originalToString.call(this);
+    };
+    delete window.__playwright;
+    delete window.__pw_manual;
+"""
+
 
 def _browser_headless() -> bool:
     """Return a safe Playwright headless setting for the worker.
@@ -353,15 +429,17 @@ class ApplyBot:
 
         try:
             from playwright.async_api import async_playwright
-            from playwright_stealth import stealth_async
-
+            
             async with async_playwright() as p:
                 import os
-                persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
                 import random as _rand
-                _chrome_ver = _rand.choice(["122", "123", "124"])
+                persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
+                
+                # FIX 4: Randomize User-Agent and viewport per session
+                _chrome_ver = _rand.choice(["122", "123", "124", "125", "126"])
                 _ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_chrome_ver}.0.0.0 Safari/537.36"
                 _w, _h = _rand.choice([(1366, 768), (1440, 900), (1536, 864), (1920, 1080)])
+                
                 launch_args = [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
@@ -373,9 +451,10 @@ class ApplyBot:
                     "--lang=en-IN",
                     "--accept-lang=en-IN,en;q=0.9",
                 ]
+                
                 context_kwargs = dict(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    viewport={"width": 1366, "height": 768},
+                    user_agent=_ua,
+                    viewport={"width": _w, "height": _h},
                     locale="en-IN",
                     timezone_id="Asia/Kolkata",
                     geolocation={"latitude": 12.9716, "longitude": 77.5946},
@@ -388,8 +467,8 @@ class ApplyBot:
                         "DNT": "1",
                     },
                 )
-                # Add proxy only when explicitly configured. Do not fall back to
-                # DataImpulse by default, because that causes cookie/IP mismatch.
+                
+                # Add proxy only when explicitly configured
                 proxy_server = os.environ.get("BROWSER_PROXY_SERVER")
                 proxy_user = os.environ.get("BROWSER_PROXY_USER")
                 proxy_pass = os.environ.get("BROWSER_PROXY_PASS")
@@ -405,29 +484,35 @@ class ApplyBot:
                 else:
                     logger.info("Browser proxy disabled")
 
-                if persistent_dir:
-                    from pathlib import Path
-                    try:
-                        Path(persistent_dir).mkdir(parents=True, exist_ok=True)
-                    except Exception:
-                        pass
-                    context = await p.chromium.launch_persistent_context(
-                        user_data_dir=persistent_dir,
-                        headless=_browser_headless(),
-                        args=launch_args,
-                        **context_kwargs,
-                    )
-                    browser = context.browser
-                    logger.info("Using persistent browser profile", dir=persistent_dir)
-                else:
-                    browser = await p.chromium.launch(
-                        headless=_browser_headless(),
-                        args=launch_args,
-                    )
-                    context = await browser.new_context(**context_kwargs)
-                    logger.info("Using fresh browser context (no persistent profile)")
+                # FIX 6: Always use fresh context per application (no persistent profile)
+                browser = await p.chromium.launch(
+                    headless=_browser_headless(),
+                    args=launch_args,
+                )
+                context = await browser.new_context(**context_kwargs)
+                logger.info("Using fresh browser context (no persistent profile)")
                 
                 context.set_default_timeout(60000)
+
+                # FIX 1: Apply stealth at CONTEXT level (always, no persistent guard)
+                await context.add_init_script(STEALTH_SCRIPT)
+                logger.info("Applied context-level stealth script")
+                
+                # FIX 6: Extra HTTP headers to look more like real browser
+                await context.set_extra_http_headers({
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Upgrade-Insecure-Requests": "1",
+                })
+                
+                # FIX 6: Random delay after context creation before navigation
+                await asyncio.sleep(_rand.uniform(1, 3))
 
                 # Only add stealth init script for non-persistent contexts
                 # Persistent profiles already have the fingerprint from login
@@ -493,7 +578,7 @@ class ApplyBot:
                     """)
 
                 page = await context.new_page()
-                await stealth_async(page)
+                
 
                 try:
                     ats = self._detect_ats(job.source_url)

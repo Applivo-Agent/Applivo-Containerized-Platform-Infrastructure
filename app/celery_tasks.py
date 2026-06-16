@@ -216,6 +216,12 @@ Applications are paused until this is fixed.
                                 db.add(app)
                                 await db.commit()
                             logger.warning("Apply failed - marked as FAILED", app_id=app_id, error=r.get("error"), retry_count=app.retry_count if app else 0)
+                        
+                        # FIX 5: Inter-job delay — prevent rate limiting
+                        if app_id != app_ids[-1]:
+                            _delay = random.uniform(12, 25)
+                            logger.info("Inter-job delay", seconds=round(_delay, 1), next_app_index=app_ids.index(app_id)+1)
+                            await asyncio.sleep(_delay)
                     except Exception as exc:
                         failed_count += 1
                         # Persist exception to DB

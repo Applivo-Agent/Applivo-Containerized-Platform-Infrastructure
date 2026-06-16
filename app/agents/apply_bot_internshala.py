@@ -2144,56 +2144,9 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         if cookies:
             logger.info("Loaded cookies from legacy shared file", count=len(cookies))
     
-    # When using a persistent browser profile, the session is already stored
-    # in the profile's Cookie DB. However, persistent profiles don't get the
-    # stealth script, which causes Internshala to detect automation.
-    # We now ALWAYS inject cookies with stealth, regardless of profile type.
-    # This is more reliable than relying on the persistent profile alone.
-    persistent_profile = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
-    using_persistent = bool(persistent_profile)
-    
-    # ── Always add stealth script first ──────────────────────
-    await page.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-        Object.defineProperty(navigator, 'connection', {
-            get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
-        });
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => Object.assign(
-                [
-                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1 },
-                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1 },
-                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2 },
-                    { name: 'Widevine Content Decryption Module', filename: 'widevinecdmadapter.dll', description: 'Widevine Content Decryption Module', length: 2 }
-                ],
-                { length: 4 }
-            )
-        });
-        Object.defineProperty(navigator, 'mimeTypes', {
-            get: () => Object.assign(
-                [
-                    { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: { name: 'Chrome PDF Plugin' } },
-                    { type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: { name: 'Chrome PDF Viewer' } },
-                    { type: 'application/x-nacl', suffixes: '', description: 'Native Client module', enabledPlugin: { name: 'Native Client' } }
-                ],
-                { length: 3 }
-            )
-        });
-        // Hide Playwright-specific properties
-        delete navigator.__proto__.webdriver;
-        window.chrome = { runtime: {} };
-        // Override permissions API
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-            parameters.name === 'notifications' ?
-                Promise.resolve({ state: Notification.permission }) :
-                originalQuery(parameters)
-        );
-    """)
+    # Stealth is now applied at context level in apply_bot.py
+    # No need to re-apply per page
+    pass
 
     # ── Always inject cookies from DB ──────────────────────────
     if cookies:
