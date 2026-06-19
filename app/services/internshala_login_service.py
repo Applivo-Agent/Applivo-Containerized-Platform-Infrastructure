@@ -14,7 +14,6 @@ from pathlib import Path
 
 import structlog
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
-from playwright_stealth import stealth_async
 from app.services.cookie_service import cookie_service
 
 logger = structlog.get_logger()
@@ -35,7 +34,83 @@ _CHROME_VER = _rand.choice(["122", "123", "124", "125", "126"])
 _USER_AGENT = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_CHROME_VER}.0.0.0 Safari/537.36"
 _W, _H = _rand.choice([(1366, 768), (1440, 900), (1536, 864), (1920, 1080)])
 
-__LAUNCH_ARGS = [
+# ── Context-level stealth script (applied to ALL pages) ──
+STEALTH_SCRIPT = """
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    Object.defineProperty(navigator, 'connection', {
+        get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
+    });
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+            var arr = [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1 },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1 },
+                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2 },
+            ];
+            arr.item = function(i) { return arr[i]; };
+            arr.namedItem = function(n) { return arr.find(function(p) { return p.name === n; }) || null; };
+            arr.refresh = function() {};
+            return arr;
+        }
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {
+        get: () => {
+            var arr = [
+                { type: 'application/pdf', suffixes: 'pdf', description: 'PDF', enabledPlugin: null },
+                { type: 'application/x-nacl', suffixes: '', description: 'Native Client', enabledPlugin: null },
+            ];
+            arr.item = function(i) { return arr[i]; };
+            arr.namedItem = function(n) { return arr.find(function(m) { return m.type === n; }) || null; };
+            return arr;
+        }
+    });
+    delete navigator.__proto__.webdriver;
+    window.chrome = {
+        app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false },
+        runtime: {
+            connect: () => ({}),
+            sendMessage: () => {},
+            id: 'nkbihfbeogaeaoehlefnkodbefgpgknn',
+        },
+        loadTimes: () => ({ firstPaintTime: 0, requestTime: Date.now()/1000 }),
+        csi: () => ({ startE: Date.now(), onloadT: Date.now() + 300 }),
+    };
+    const getParamProto = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) return 'Intel Inc.';
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+        return getParamProto.apply(this, [parameter]);
+    };
+    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+    if (originalQuery) {
+        window.navigator.permissions.query = (parameters) =>
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+    }
+    if (!navigator.getBattery) {
+        navigator.getBattery = () => Promise.resolve({
+            charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1.0
+        });
+    }
+    Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+    Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+    const originalToString = Function.prototype.toString;
+    Function.prototype.toString = function() {
+        if (this === window.navigator.permissions.query) {
+            return 'function query() { [native code] }';
+        }
+        return originalToString.call(this);
+    };
+    delete window.__playwright;
+    delete window.__pw_manual;
+"""
+
+_LAUNCH_ARGS = [
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--disable-blink-features=AutomationControlled",
@@ -46,7 +121,7 @@ __LAUNCH_ARGS = [
     "--disable-gpu",
 ]
 
-__CONTEXT_KWARGS = dict(
+_CONTEXT_KWARGS = dict(
     user_agent=_USER_AGENT,
     viewport={"width": _W, "height": _H},
     locale="en-IN",
@@ -111,7 +186,7 @@ class InternshalaLoginService:
             proxy_pass = os.environ.get("INTERNSHALA_PROXY_PASSWORD")
             headless = _browser_headless()
 
-            launch_args = __LAUNCH_ARGS.copy()
+            launch_args = _LAUNCH_ARGS.copy()
             launch_args.extend([
                 "--disable-web-security",
                 "--disable-features=IsolateOrigins,site-per-process",
@@ -127,7 +202,7 @@ class InternshalaLoginService:
                     proxy["password"] = proxy_pass
 
             # Use shared context kwargs
-            context_kwargs = __CONTEXT_KWARGS.copy()
+            context_kwargs = _CONTEXT_KWARGS.copy()
             context_kwargs["accept_downloads"] = True
             if proxy:
                 context_kwargs["proxy"] = proxy
@@ -178,45 +253,11 @@ class InternshalaLoginService:
                 "Accept-Language": "en-US,en;q=0.9",
             })
             
+            # FIX 1: Apply stealth at CONTEXT level (matches apply_bot.py)
+            await context.add_init_script(STEALTH_SCRIPT)
+            
             page = await context.new_page()
-            await stealth_async(page)
-            # Apply shared stealth script for consistent fingerprinting
-            await page.add_init_script("""
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-US', 'en'] });
-    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    Object.defineProperty(navigator, 'connection', {
-        get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
-    });
-    delete navigator.__proto__.webdriver;
-    window.chrome = {
-        app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false },
-        runtime: {
-            connect: () => ({}),
-            sendMessage: () => {},
-            id: 'nkbihfbeogaeaoehlefnkodbefgpgknn',
-        },
-        loadTimes: () => ({ firstPaintTime: 0, requestTime: Date.now()/1000 }),
-        csi: () => ({ startE: Date.now(), onloadT: Date.now() + 300 }),
-    };
-    const getParamProto = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) return 'Intel Inc.';
-        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-        return getParamProto.apply(this, [parameter]);
-    };
-    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
-    if (originalQuery) {
-        window.navigator.permissions.query = (parameters) =>
-            parameters.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : originalQuery(parameters);
-    }
-    delete window.__playwright;
-    delete window.__pw_manual;
-""")
+            
             # Event set when a network response indicates successful auth (XHR or Set-Cookie)
             auth_event = asyncio.Event()
 
