@@ -1,9 +1,3 @@
-"""
-app/celery_app.py
-──────────────────
-Celery worker and beat configuration for background task processing.
-All long-running automation tasks run through Celery workers.
-"""
 
 from __future__ import annotations
 
