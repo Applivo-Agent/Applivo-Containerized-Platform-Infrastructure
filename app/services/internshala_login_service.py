@@ -19,13 +19,23 @@ from app.services.cookie_service import cookie_service
 logger = structlog.get_logger()
 
 
-def _browser_headless() -> bool:
-    """Always run headless for server-side login — stealth handles detection."""
+def _browser_headless() -> Union[bool, str]:
+    """
+    Return headless setting for server-side login.
+    Defaults to 'shell' (new Chromium headless mode) which is far less detectable
+    than the legacy headless=True. Use BROWSER_HEADLESS=1 for legacy mode or
+    BROWSER_HEADLESS=0 for headed mode (requires a display).
+    """
     headless_env = os.environ.get("INTERNSHALA_HEADLESS") or os.environ.get("BROWSER_HEADLESS")
     if headless_env is not None:
-        return headless_env.strip().lower() in ("1", "true", "yes", "on")
-    # Default to headless; the container has no X11 and stealth patches hide automation
-    return True
+        val = headless_env.strip().lower()
+        if val in ("0", "false", "no", "off"):
+            return False
+        if val == "shell":
+            return "shell"
+        return True
+    # Default to new headless shell mode for better stealth.
+    return "shell"
 
 
 # Browser fingerprint config (must match apply_bot.py exactly)
@@ -128,7 +138,13 @@ _CONTEXT_KWARGS = dict(
     timezone_id="Asia/Kolkata",
     permissions=["geolocation"],
     geolocation={"latitude": 12.9716, "longitude": 77.5946},
-    accept_downloads=True,
+    color_scheme="light",
+    java_script_enabled=True,
+    extra_http_headers={
+        "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+    },
 )
 
 class InternshalaLoginService:
@@ -259,11 +275,6 @@ class InternshalaLoginService:
                 context = await browser.new_context(**context_kwargs)
                 
             context.set_default_timeout(60000)
-
-            # Add extra headers to look more like real browser
-            await context.set_extra_http_headers({
-                "Accept-Language": "en-US,en;q=0.9",
-            })
             
             # FIX 1: Apply stealth at CONTEXT level (matches apply_bot.py)
             await context.add_init_script(STEALTH_SCRIPT)
@@ -434,27 +445,42 @@ class InternshalaLoginService:
             "button:has-text('Sign in')",
         ]
 
-        async def fill_first(selectors: list[str], value: str) -> bool:
+        async def fill_first_human(selectors: list[str], value: str) -> bool:
             for selector in selectors:
                 try:
                     element = await page.query_selector(selector)
                     if element:
-                        await element.fill(value)
+                        await element.scroll_into_view_if_needed()
+                        await element.click()
+                        await element.fill("")
+                        # Human-like typing with variable delay and occasional pauses
+                        for char in value:
+                            await element.type(char, delay=random.uniform(40, 130))
+                            if random.random() < 0.05:
+                                await asyncio.sleep(random.uniform(0.1, 0.3))
                         return True
                 except Exception:
                     continue
             return False
 
-        email_filled = await fill_first(email_selectors, email)
-        password_filled = await fill_first(password_selectors, password)
+        email_filled = await fill_first_human(email_selectors, email)
+        if not email_filled:
+            raise RuntimeError("Unable to find Internshala email field")
 
-        if not email_filled or not password_filled:
-            raise RuntimeError("Unable to find Internshala login form fields")
+        await asyncio.sleep(random.uniform(0.4, 1.0))
+
+        password_filled = await fill_first_human(password_selectors, password)
+        if not password_filled:
+            raise RuntimeError("Unable to find Internshala password field")
+
+        await asyncio.sleep(random.uniform(0.5, 1.2))
 
         for selector in submit_selectors:
             try:
                 button = await page.query_selector(selector)
                 if button:
+                    await button.scroll_into_view_if_needed()
+                    await asyncio.sleep(random.uniform(0.2, 0.5))
                     await button.click()
                     return
             except Exception:

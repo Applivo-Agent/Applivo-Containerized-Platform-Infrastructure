@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import structlog
 from sqlalchemy import select
@@ -107,21 +107,26 @@ STEALTH_SCRIPT = """
 """
 
 
-def _browser_headless() -> bool:
+def _browser_headless() -> Union[bool, str]:
     """Return a safe Playwright headless setting for the worker.
 
-    The worker runs in Docker without a GUI, so we treat headless mode as the
-    default and only attempt headed mode when explicitly disabled and a display
-    is actually available.
+    Defaults to 'shell' (new Chromium headless mode) which is much less detectable
+    than legacy headless=True. Use BROWSER_HEADLESS=1 for legacy mode or
+    BROWSER_HEADLESS=0 for headed mode (requires a display).
     """
     import os
 
     headless_env = os.environ.get("BROWSER_HEADLESS")
     if headless_env is not None:
-        return headless_env.strip().lower() in ("1", "true", "yes", "on")
+        val = headless_env.strip().lower()
+        if val in ("0", "false", "no", "off"):
+            return False
+        if val == "shell":
+            return "shell"
+        return True
 
-    # No explicit override: force headless when the container has no display.
-    return not bool(os.environ.get("DISPLAY"))
+    # Default to new headless shell mode for better stealth.
+    return "shell"
 
 
 class ApplyBot:
@@ -724,7 +729,7 @@ class ApplyBot:
                             context_kwargs["viewport"] = fp_vp
 
                     browser = await p.chromium.launch(
-                        headless=True,
+                        headless=_browser_headless(),
                         args=[
                             "--no-sandbox",
                             "--disable-blink-features=AutomationControlled",
