@@ -444,6 +444,7 @@ class ApplyBot:
                 # cookie-based platforms (e.g. Internshala) before creating context.
                 ats = self._detect_ats(job.source_url)
                 internshala_cookies = None
+                internshala_storage_state = None
                 internshala_fingerprint = None
                 if ats == "internshala" and app.user_id:
                     try:
@@ -451,6 +452,7 @@ class ApplyBot:
                         cookie_data = await cookie_service.get_cookies(app.user_id, "internshala")
                         if cookie_data:
                             internshala_cookies = cookie_data.get("cookies")
+                            internshala_storage_state = cookie_data.get("storage_state")
                             internshala_fingerprint = cookie_data.get("fingerprint")
                             if internshala_fingerprint:
                                 logger.info(
@@ -458,6 +460,13 @@ class ApplyBot:
                                     user_id=str(app.user_id),
                                     user_agent=internshala_fingerprint.get("user_agent", "")[:40],
                                     viewport=internshala_fingerprint.get("viewport"),
+                                )
+                            if internshala_storage_state:
+                                logger.info(
+                                    "Loaded full Internshala storage_state (cookies + localStorage)",
+                                    user_id=str(app.user_id),
+                                    cookie_count=len(internshala_storage_state.get("cookies", [])),
+                                    origin_count=len(internshala_storage_state.get("origins", [])),
                                 )
                     except Exception as e:
                         logger.warning("Could not load Internshala cookies/fingerprint", error=str(e))
@@ -536,7 +545,12 @@ class ApplyBot:
                     headless=_browser_headless(),
                     args=launch_args,
                 )
-                context = await browser.new_context(**context_kwargs)
+                # Restore full storage state (cookies + localStorage) for Internshala
+                # so sessions that depend on localStorage tokens keep working.
+                new_context_kwargs = dict(context_kwargs)
+                if internshala_storage_state:
+                    new_context_kwargs["storage_state"] = internshala_storage_state
+                context = await browser.new_context(**new_context_kwargs)
                 logger.info("Using fresh browser context (no persistent profile)")
                 
                 context.set_default_timeout(60000)
@@ -631,11 +645,13 @@ class ApplyBot:
                     logger.info("Detected ATS", ats=ats, url=job.source_url)
 
                     if ats == "internshala":
+                        # If storage_state was restored, cookies are already in context.
+                        cookies_to_inject = internshala_cookies if not internshala_storage_state else None
                         result = await apply_internshala(
                             page, job, profile, resume, settings,
                             user_id=app.user_id,
                             user_full_name=user_full_name,
-                            preloaded_cookies=internshala_cookies,
+                            preloaded_cookies=cookies_to_inject,
                         )
                     elif ats == "linkedin":
                         result = await self._apply_linkedin(page, job, profile, resume)
@@ -699,6 +715,7 @@ class ApplyBot:
                 async with async_playwright() as p:
                     ats = self._detect_ats(job.source_url)
                     internshala_cookies = None
+                    internshala_storage_state = None
                     internshala_fingerprint = None
                     if ats == "internshala" and app.user_id:
                         try:
@@ -706,6 +723,7 @@ class ApplyBot:
                             cookie_data = await cookie_service.get_cookies(app.user_id, "internshala")
                             if cookie_data:
                                 internshala_cookies = cookie_data.get("cookies")
+                                internshala_storage_state = cookie_data.get("storage_state")
                                 internshala_fingerprint = cookie_data.get("fingerprint")
                         except Exception as e:
                             logger.warning("Could not load Internshala cookies/fingerprint (sync wrapper)", error=str(e))
@@ -738,6 +756,8 @@ class ApplyBot:
                             "--window-size=1366,768",
                         ],
                     )
+                    if internshala_storage_state:
+                        context_kwargs["storage_state"] = internshala_storage_state
                     context = await browser.new_context(**context_kwargs)
                     await context.add_init_script(STEALTH_SCRIPT)
                     page = await context.new_page()
@@ -745,7 +765,8 @@ class ApplyBot:
                         if ats == "internshala":
                             from app.core.config import settings as _s
                             from app.agents.apply_bot_internshala import apply_internshala
-                            result = await apply_internshala(page, job, profile, resume, _s, user_id=app.user_id, preloaded_cookies=internshala_cookies)
+                            cookies_to_inject = internshala_cookies if not internshala_storage_state else None
+                            result = await apply_internshala(page, job, profile, resume, _s, user_id=app.user_id, preloaded_cookies=cookies_to_inject)
                         elif ats == "linkedin":
                             result = await self._apply_linkedin(page, job, profile, resume)
                         elif ats == "greenhouse":

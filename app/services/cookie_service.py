@@ -44,11 +44,14 @@ class CookieService:
         fingerprint: Optional[dict] = None,
     ) -> PlatformCookie:
         """
-        Encrypt and save platform cookies for a user.
+        Encrypt and save platform cookies/storage_state for a user.
         Replaces any existing cookies for the same platform.
         Sets expiry to 30 days from now (typical Internshala session duration).
         Optionally stores the browser fingerprint used at login so the apply bot
         can reuse it and avoid invalidating the session.
+
+        `cookies` may be a legacy list of cookies OR a Playwright storage_state
+        dict containing both cookies and localStorage/origins.
         """
         if platform not in SUPPORTED_PLATFORMS:
             raise ValueError(f"Unsupported platform: {platform}. Supported: {SUPPORTED_PLATFORMS}")
@@ -100,9 +103,10 @@ class CookieService:
         self, user_id: str, platform: str,
     ) -> Optional[dict]:
         """
-        Decrypt and return platform cookies + fingerprint for a user.
+        Decrypt and return platform cookies + storage_state + fingerprint.
         Returns a dict with keys:
-            - "cookies": the decrypted cookie list/dict
+            - "cookies": list of HTTP cookies (always a list)
+            - "storage_state": full Playwright storage_state dict if available
             - "fingerprint": dict with user_agent, viewport, etc. (may be None)
         Returns None if no valid cookies exist.
         """
@@ -120,8 +124,16 @@ class CookieService:
 
             try:
                 decrypted = self.enc.decrypt_json(cookie.encrypted_cookies)
+                # Support both legacy cookie lists and full Playwright storage_state.
+                if isinstance(decrypted, dict) and "cookies" in decrypted:
+                    storage_state = decrypted
+                    cookies_list = storage_state.get("cookies", [])
+                else:
+                    storage_state = None
+                    cookies_list = decrypted if isinstance(decrypted, list) else [decrypted]
                 return {
-                    "cookies": decrypted,
+                    "cookies": cookies_list,
+                    "storage_state": storage_state,
                     "fingerprint": cookie.fingerprint,
                 }
             except Exception as e:

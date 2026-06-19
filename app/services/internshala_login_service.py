@@ -161,9 +161,9 @@ class InternshalaLoginService:
         """
         logger.info("Starting Internshala login")
         
-        cookies, fingerprint = await self._perform_login(page_email=email, page_password=password)
+        storage_state, fingerprint = await self._perform_login(page_email=email, page_password=password)
         
-        if not cookies:
+        if not storage_state:
             return {
                 "success": False,
                 "message": "Login failed - no cookies obtained. Please try again.",
@@ -173,14 +173,14 @@ class InternshalaLoginService:
         await cookie_service.save_cookies(
             user_id=user_id,
             platform="internshala",
-            cookies=cookies,
+            cookies=storage_state,
             fingerprint=fingerprint,
         )
         
         return {
             "success": True,
             "message": "Successfully logged in and saved cookies",
-            "cookies_count": len(cookies),
+            "cookies_count": len(storage_state.get("cookies", [])),
             "needs_captcha": False,
         }
 
@@ -386,11 +386,14 @@ class InternshalaLoginService:
                 logger.error("Login verification failed")
                 return None, None
             
-            logger.info("Login successful, extracting cookies")
-            cookies = await context.cookies()
+            logger.info("Login successful, extracting storage state")
+            # Capture full storage state (cookies + localStorage/origins) because
+            # modern sites like Internshala store session tokens in localStorage.
+            storage_state = await context.storage_state()
+            cookies = storage_state.get("cookies", [])
             logger.info("Got cookies", count=len(cookies))
 
-            # Persist storage_state after a successful interactive login if configured
+            # Persist storage_state to a file if configured (for debugging)
             try:
                 storage_state_path = os.environ.get("INTERNSHALA_STORAGE_STATE_PATH")
                 if storage_state_path:
@@ -398,7 +401,8 @@ class InternshalaLoginService:
                         parent = Path(storage_state_path).parent
                         if not parent.exists():
                             parent.mkdir(parents=True, exist_ok=True)
-                        await context.storage_state(path=storage_state_path)
+                        import json as _json
+                        Path(storage_state_path).write_text(_json.dumps(storage_state))
                         logger.info("Saved Internshala storage_state", path=storage_state_path)
                     except Exception as e:
                         logger.info("Failed to save storage_state", error=str(e))
@@ -411,7 +415,7 @@ class InternshalaLoginService:
                 await context.close()
             await playwright.stop()
             
-            return cookies, fingerprint
+            return storage_state, fingerprint
             
         except Exception as e:
             logger.error("Login failed with exception", error=str(e), error_type=type(e).__name__)

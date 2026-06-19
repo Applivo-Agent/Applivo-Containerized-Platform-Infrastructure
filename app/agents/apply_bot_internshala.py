@@ -2188,8 +2188,8 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         if user_id:
             try:
                 from app.services.cookie_service import cookie_service
-                new_cookies = await context.cookies()
-                # Capture the fingerprint from the current context so future applies match.
+                # Capture full storage state (cookies + localStorage) and fingerprint.
+                new_storage_state = await context.storage_state()
                 new_fingerprint = {
                     "user_agent": context._options.get("user_agent") if hasattr(context, "_options") else None,
                     "viewport": context._options.get("viewport") if hasattr(context, "_options") else None,
@@ -2198,8 +2198,8 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                     "geolocation": context._options.get("geolocation") if hasattr(context, "_options") else None,
                 }
                 new_fingerprint = {k: v for k, v in new_fingerprint.items() if v is not None}
-                await cookie_service.save_cookies(user_id, "internshala", new_cookies, fingerprint=new_fingerprint)
-                logger.info("Automatic login cookies saved to database", user_id=user_id)
+                await cookie_service.save_cookies(user_id, "internshala", new_storage_state, fingerprint=new_fingerprint)
+                logger.info("Automatic login storage_state saved to database", user_id=user_id)
             except Exception as e:
                 logger.warning("Failed to save automatic login cookies to database", user_id=user_id, error=str(e))
         # Always save to file as fallback / for debugging
@@ -2781,7 +2781,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                             if user_id:
                                 try:
                                     from app.services.cookie_service import cookie_service
-                                    new_cookies = await page.context.cookies()
+                                    new_storage_state = await page.context.storage_state()
                                     ctx_options = page.context._options if hasattr(page.context, "_options") else {}
                                     new_fingerprint = {
                                         "user_agent": ctx_options.get("user_agent"),
@@ -2791,7 +2791,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                                         "geolocation": ctx_options.get("geolocation"),
                                     }
                                     new_fingerprint = {k: v for k, v in new_fingerprint.items() if v is not None}
-                                    await cookie_service.save_cookies(user_id, "internshala", new_cookies, fingerprint=new_fingerprint)
+                                    await cookie_service.save_cookies(user_id, "internshala", new_storage_state, fingerprint=new_fingerprint)
                                 except Exception as e:
                                     logger.warning("Failed to save refreshed cookies", error=str(e))
                             await _save_cookies(page.context)
