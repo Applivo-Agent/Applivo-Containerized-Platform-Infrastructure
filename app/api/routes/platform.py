@@ -251,11 +251,21 @@ async def test_platform_connection(
     if platform == "internshala":
         try:
             from playwright.async_api import async_playwright
-            cookies = await cookie_service.get_cookies(current_user.id, platform)
+            cookie_data = await cookie_service.get_cookies(current_user.id, platform)
+            cookies = cookie_data.get("cookies") if cookie_data else None
+            fingerprint = cookie_data.get("fingerprint") if cookie_data else None
             
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-                context = await browser.new_context()
+                context_kwargs = {}
+                if fingerprint:
+                    fp_ua = fingerprint.get("user_agent")
+                    fp_vp = fingerprint.get("viewport")
+                    if fp_ua:
+                        context_kwargs["user_agent"] = fp_ua
+                    if fp_vp and isinstance(fp_vp, dict) and "width" in fp_vp and "height" in fp_vp:
+                        context_kwargs["viewport"] = fp_vp
+                context = await browser.new_context(**context_kwargs)
                 if cookies and isinstance(cookies, list):
                     await context.add_cookies(cookies)
                 

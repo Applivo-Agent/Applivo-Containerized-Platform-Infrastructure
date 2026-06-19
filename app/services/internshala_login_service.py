@@ -145,7 +145,7 @@ class InternshalaLoginService:
         """
         logger.info("Starting Internshala login")
         
-        cookies = await self._perform_login(page_email=email, page_password=password)
+        cookies, fingerprint = await self._perform_login(page_email=email, page_password=password)
         
         if not cookies:
             return {
@@ -158,6 +158,7 @@ class InternshalaLoginService:
             user_id=user_id,
             platform="internshala",
             cookies=cookies,
+            fingerprint=fingerprint,
         )
         
         return {
@@ -206,6 +207,17 @@ class InternshalaLoginService:
             context_kwargs["accept_downloads"] = True
             if proxy:
                 context_kwargs["proxy"] = proxy
+
+            # Capture the fingerprint that will be paired with these cookies.
+            # The apply bot reuses this exact fingerprint so Internshala doesn't
+            # invalidate the session due to UA/viewport drift.
+            fingerprint = {
+                "user_agent": context_kwargs.get("user_agent"),
+                "viewport": context_kwargs.get("viewport"),
+                "locale": context_kwargs.get("locale"),
+                "timezone_id": context_kwargs.get("timezone_id"),
+                "geolocation": context_kwargs.get("geolocation"),
+            }
 
             # Optionally use a persisted storage_state
             storage_state_path = os.environ.get("INTERNSHALA_STORAGE_STATE_PATH")
@@ -353,7 +365,7 @@ class InternshalaLoginService:
             
             if not login_success:
                 logger.error("Login timeout - verification did not complete", mode=login_mode, timeout=wait_timeout)
-                return None
+                return None, None
             
             await asyncio.sleep(2)
             
@@ -361,7 +373,7 @@ class InternshalaLoginService:
             is_logged_in = await self._verify_login(page)
             if not is_logged_in:
                 logger.error("Login verification failed")
-                return None
+                return None, None
             
             logger.info("Login successful, extracting cookies")
             cookies = await context.cookies()
@@ -388,7 +400,7 @@ class InternshalaLoginService:
                 await context.close()
             await playwright.stop()
             
-            return cookies
+            return cookies, fingerprint
             
         except Exception as e:
             logger.error("Login failed with exception", error=str(e), error_type=type(e).__name__)
@@ -399,7 +411,7 @@ class InternshalaLoginService:
                     await playwright.stop()
             except:
                 pass
-            return None
+            return None, None
 
     async def _submit_credentials(self, page: Page, email: str, password: str) -> None:
         """Fill the login form using common Internshala selectors and submit it."""

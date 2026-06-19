@@ -42,8 +42,8 @@ class MessageScannerService:
         """
         logger.info("Starting message scan", user_id=user_id, platform=platform)
         
-        cookies = await cookie_service.get_cookies(user_id, platform)
-        if not cookies:
+        cookie_data = await cookie_service.get_cookies(user_id, platform)
+        if not cookie_data or not cookie_data.get("cookies"):
             logger.warning("No cookies found for user", user_id=user_id, platform=platform)
             return {
                 "success": False,
@@ -51,6 +51,7 @@ class MessageScannerService:
                 "new_messages": 0,
             }
         
+        cookies = cookie_data["cookies"]
         messages = await self._scan_inbox(platform=platform, cookies=cookies)
         
         if not messages:

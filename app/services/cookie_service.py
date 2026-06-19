@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Union
+from typing import Any, Optional, Union, Dict, List
 
 import structlog
 from sqlalchemy import select
@@ -41,11 +41,14 @@ class CookieService:
         user_id: str,
         platform: str,
         cookies: Union[dict, list],
+        fingerprint: Optional[dict] = None,
     ) -> PlatformCookie:
         """
         Encrypt and save platform cookies for a user.
         Replaces any existing cookies for the same platform.
         Sets expiry to 30 days from now (typical Internshala session duration).
+        Optionally stores the browser fingerprint used at login so the apply bot
+        can reuse it and avoid invalidating the session.
         """
         if platform not in SUPPORTED_PLATFORMS:
             raise ValueError(f"Unsupported platform: {platform}. Supported: {SUPPORTED_PLATFORMS}")
@@ -71,6 +74,8 @@ class CookieService:
                 existing.last_validated_at = now
                 existing.expires_at = expires_at
                 existing.updated_at = now
+                if fingerprint is not None:
+                    existing.fingerprint = fingerprint
                 await db.commit()
                 await db.refresh(existing)
                 logger.info("Cookies updated", user_id=user_id, platform=platform)
@@ -80,6 +85,7 @@ class CookieService:
                 user_id=user_id,
                 platform=platform,
                 encrypted_cookies=encrypted,
+                fingerprint=fingerprint,
                 is_valid=True,
                 last_validated_at=now,
                 expires_at=expires_at,
@@ -92,8 +98,14 @@ class CookieService:
 
     async def get_cookies(
         self, user_id: str, platform: str,
-    ) -> Optional[Union[dict, list]]:
-        """Decrypt and return platform cookies for a user."""
+    ) -> Optional[dict]:
+        """
+        Decrypt and return platform cookies + fingerprint for a user.
+        Returns a dict with keys:
+            - "cookies": the decrypted cookie list/dict
+            - "fingerprint": dict with user_agent, viewport, etc. (may be None)
+        Returns None if no valid cookies exist.
+        """
         async with get_db_context() as db:
             result = await db.execute(
                 select(PlatformCookie).where(
@@ -108,7 +120,10 @@ class CookieService:
 
             try:
                 decrypted = self.enc.decrypt_json(cookie.encrypted_cookies)
-                return decrypted
+                return {
+                    "cookies": decrypted,
+                    "fingerprint": cookie.fingerprint,
+                }
             except Exception as e:
                 logger.error("Cookie decryption failed", user_id=user_id, platform=platform, error=str(e))
                 cookie.is_valid = False
@@ -187,6 +202,7 @@ class CookieService:
                     "last_validated": c.last_validated_at.isoformat() if c.last_validated_at else None,
                     "last_used": c.last_used_at.isoformat() if c.last_used_at else None,
                     "expires_at": c.expires_at.isoformat() if c.expires_at else None,
+                    "has_fingerprint": bool(c.fingerprint),
                 }
                 for c in cookies
             ]

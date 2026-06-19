@@ -2120,7 +2120,7 @@ async def _fill_application_form(
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None, user_full_name: Optional[str] = None, is_retry: bool = False) -> dict:
+async def apply_internshala(page, job, profile, resume, settings_obj, user_id: Optional[str] = None, user_full_name: Optional[str] = None, is_retry: bool = False, preloaded_cookies: Optional[list] = None) -> dict:
     context = page.context
 
     # ── Cookie Loading ───────────────────────────────────────
@@ -2128,11 +2128,15 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     # Only fall back to the legacy shared file for single-user / CLI usage.
     cookies: list = []
 
-    if user_id:
+    if preloaded_cookies:
+        cookies = preloaded_cookies if isinstance(preloaded_cookies, list) else [preloaded_cookies]
+        logger.info("Using preloaded cookies", user_id=user_id, count=len(cookies))
+    elif user_id:
         try:
             from app.services.cookie_service import cookie_service
-            db_cookies = await cookie_service.get_cookies(user_id, "internshala")
-            if db_cookies:
+            cookie_data = await cookie_service.get_cookies(user_id, "internshala")
+            if cookie_data:
+                db_cookies = cookie_data.get("cookies")
                 cookies = db_cookies if isinstance(db_cookies, list) else [db_cookies]
                 logger.info("Loaded cookies from database", user_id=user_id, count=len(cookies))
         except Exception as e:
@@ -2185,7 +2189,16 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
             try:
                 from app.services.cookie_service import cookie_service
                 new_cookies = await context.cookies()
-                await cookie_service.save_cookies(user_id, "internshala", new_cookies)
+                # Capture the fingerprint from the current context so future applies match.
+                new_fingerprint = {
+                    "user_agent": context._options.get("user_agent") if hasattr(context, "_options") else None,
+                    "viewport": context._options.get("viewport") if hasattr(context, "_options") else None,
+                    "locale": context._options.get("locale") if hasattr(context, "_options") else None,
+                    "timezone_id": context._options.get("timezone_id") if hasattr(context, "_options") else None,
+                    "geolocation": context._options.get("geolocation") if hasattr(context, "_options") else None,
+                }
+                new_fingerprint = {k: v for k, v in new_fingerprint.items() if v is not None}
+                await cookie_service.save_cookies(user_id, "internshala", new_cookies, fingerprint=new_fingerprint)
                 logger.info("Automatic login cookies saved to database", user_id=user_id)
             except Exception as e:
                 logger.warning("Failed to save automatic login cookies to database", user_id=user_id, error=str(e))
@@ -2769,7 +2782,16 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
                                 try:
                                     from app.services.cookie_service import cookie_service
                                     new_cookies = await page.context.cookies()
-                                    await cookie_service.save_cookies(user_id, "internshala", new_cookies)
+                                    ctx_options = page.context._options if hasattr(page.context, "_options") else {}
+                                    new_fingerprint = {
+                                        "user_agent": ctx_options.get("user_agent"),
+                                        "viewport": ctx_options.get("viewport"),
+                                        "locale": ctx_options.get("locale"),
+                                        "timezone_id": ctx_options.get("timezone_id"),
+                                        "geolocation": ctx_options.get("geolocation"),
+                                    }
+                                    new_fingerprint = {k: v for k, v in new_fingerprint.items() if v is not None}
+                                    await cookie_service.save_cookies(user_id, "internshala", new_cookies, fingerprint=new_fingerprint)
                                 except Exception as e:
                                     logger.warning("Failed to save refreshed cookies", error=str(e))
                             await _save_cookies(page.context)

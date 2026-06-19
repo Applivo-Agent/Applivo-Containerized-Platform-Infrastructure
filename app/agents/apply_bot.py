@@ -435,6 +435,28 @@ class ApplyBot:
                 import random as _rand
                 persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
                 
+                # Detect ATS early so we can load the stored fingerprint for
+                # cookie-based platforms (e.g. Internshala) before creating context.
+                ats = self._detect_ats(job.source_url)
+                internshala_cookies = None
+                internshala_fingerprint = None
+                if ats == "internshala" and app.user_id:
+                    try:
+                        from app.services.cookie_service import cookie_service
+                        cookie_data = await cookie_service.get_cookies(app.user_id, "internshala")
+                        if cookie_data:
+                            internshala_cookies = cookie_data.get("cookies")
+                            internshala_fingerprint = cookie_data.get("fingerprint")
+                            if internshala_fingerprint:
+                                logger.info(
+                                    "Loaded Internshala fingerprint from DB",
+                                    user_id=str(app.user_id),
+                                    user_agent=internshala_fingerprint.get("user_agent", "")[:40],
+                                    viewport=internshala_fingerprint.get("viewport"),
+                                )
+                    except Exception as e:
+                        logger.warning("Could not load Internshala cookies/fingerprint", error=str(e))
+                
                 # FIX 4: Randomize User-Agent and viewport per session
                 _chrome_ver = _rand.choice(["122", "123", "124", "125", "126"])
                 _ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_chrome_ver}.0.0.0 Safari/537.36"
@@ -467,6 +489,26 @@ class ApplyBot:
                         "DNT": "1",
                     },
                 )
+                
+                # Reuse the exact fingerprint that captured these cookies so
+                # Internshala doesn't flag the session as stolen/suspicious.
+                if internshala_fingerprint:
+                    fp_ua = internshala_fingerprint.get("user_agent")
+                    fp_vp = internshala_fingerprint.get("viewport")
+                    fp_locale = internshala_fingerprint.get("locale")
+                    fp_tz = internshala_fingerprint.get("timezone_id")
+                    fp_geo = internshala_fingerprint.get("geolocation")
+                    if fp_ua:
+                        context_kwargs["user_agent"] = fp_ua
+                    if fp_vp and isinstance(fp_vp, dict) and "width" in fp_vp and "height" in fp_vp:
+                        context_kwargs["viewport"] = fp_vp
+                    if fp_locale:
+                        context_kwargs["locale"] = fp_locale
+                    if fp_tz:
+                        context_kwargs["timezone_id"] = fp_tz
+                    if fp_geo:
+                        context_kwargs["geolocation"] = fp_geo
+                    logger.info("Applied stored Internshala fingerprint for context creation")
                 
                 # Add proxy only when explicitly configured
                 proxy_server = os.environ.get("BROWSER_PROXY_SERVER")
@@ -581,11 +623,15 @@ class ApplyBot:
                 
 
                 try:
-                    ats = self._detect_ats(job.source_url)
                     logger.info("Detected ATS", ats=ats, url=job.source_url)
 
                     if ats == "internshala":
-                        result = await apply_internshala(page, job, profile, resume, settings, user_id=app.user_id, user_full_name=user_full_name)
+                        result = await apply_internshala(
+                            page, job, profile, resume, settings,
+                            user_id=app.user_id,
+                            user_full_name=user_full_name,
+                            preloaded_cookies=internshala_cookies,
+                        )
                     elif ats == "linkedin":
                         result = await self._apply_linkedin(page, job, profile, resume)
                     elif ats == "greenhouse":
@@ -646,6 +692,37 @@ class ApplyBot:
             from playwright.async_api import async_playwright
             try:
                 async with async_playwright() as p:
+                    ats = self._detect_ats(job.source_url)
+                    internshala_cookies = None
+                    internshala_fingerprint = None
+                    if ats == "internshala" and app.user_id:
+                        try:
+                            from app.services.cookie_service import cookie_service
+                            cookie_data = await cookie_service.get_cookies(app.user_id, "internshala")
+                            if cookie_data:
+                                internshala_cookies = cookie_data.get("cookies")
+                                internshala_fingerprint = cookie_data.get("fingerprint")
+                        except Exception as e:
+                            logger.warning("Could not load Internshala cookies/fingerprint (sync wrapper)", error=str(e))
+
+                    context_kwargs = dict(
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"
+                        ),
+                        viewport={"width": 1366, "height": 768},
+                        locale="en-IN",
+                        timezone_id="Asia/Kolkata",
+                    )
+                    if internshala_fingerprint:
+                        fp_ua = internshala_fingerprint.get("user_agent")
+                        fp_vp = internshala_fingerprint.get("viewport")
+                        if fp_ua:
+                            context_kwargs["user_agent"] = fp_ua
+                        if fp_vp and isinstance(fp_vp, dict) and "width" in fp_vp and "height" in fp_vp:
+                            context_kwargs["viewport"] = fp_vp
+
                     browser = await p.chromium.launch(
                         headless=True,
                         args=[
@@ -656,23 +733,14 @@ class ApplyBot:
                             "--window-size=1366,768",
                         ],
                     )
-                    context = await browser.new_context(
-                        user_agent=(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/124.0.0.0 Safari/537.36"
-                        ),
-                        viewport={"width": 1366, "height": 768},
-                        locale="en-IN",
-                        timezone_id="Asia/Kolkata",
-                    )
+                    context = await browser.new_context(**context_kwargs)
+                    await context.add_init_script(STEALTH_SCRIPT)
                     page = await context.new_page()
                     try:
-                        ats = self._detect_ats(job.source_url)
                         if ats == "internshala":
                             from app.core.config import settings as _s
                             from app.agents.apply_bot_internshala import apply_internshala
-                            result = await apply_internshala(page, job, profile, resume, _s)
+                            result = await apply_internshala(page, job, profile, resume, _s, user_id=app.user_id, preloaded_cookies=internshala_cookies)
                         elif ats == "linkedin":
                             result = await self._apply_linkedin(page, job, profile, resume)
                         elif ats == "greenhouse":

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -55,6 +56,13 @@ class PlatformCookie(Base, UUIDMixin, TimestampMixin):
     )
     last_used_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,
+    )
+
+    # Browser fingerprint captured at login time so apply bot can reuse it.
+    # Storing user_agent + viewport (and any other context args) ensures the
+    # session cookies are not invalidated by fingerprint drift.
+    fingerprint: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True, default=None,
     )
 
     # Relationship
