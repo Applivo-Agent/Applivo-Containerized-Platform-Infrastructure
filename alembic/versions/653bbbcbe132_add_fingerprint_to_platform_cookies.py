@@ -21,7 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Add JSON fingerprint column to platform_cookies so the apply bot can
     # reuse the exact browser fingerprint that captured the session cookies.
-    op.add_column('platform_cookies', sa.Column('fingerprint', sa.JSON(), nullable=True))
+    from sqlalchemy import inspect
+    from app.core.database import engine
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [c['name'] for c in inspector.get_columns('platform_cookies')]
+    if 'fingerprint' not in columns:
+        op.add_column('platform_cookies', sa.Column('fingerprint', sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
