@@ -22,6 +22,18 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "https://applivo.in"
     SECRET_KEY: str = "changeme-at-least-32-characters-long-secret"
     BROWSER_HEADLESS: bool = True
+
+    @field_validator("BROWSER_HEADLESS", mode="before")
+    @classmethod
+    def parse_browser_headless(cls, v):
+        """Allow 'shell', 'true', 'false', '1', '0' as strings."""
+        if isinstance(v, str):
+            v_lower = v.strip().lower()
+            if v_lower in ("1", "true", "yes", "on", "shell"):
+                return True
+            if v_lower in ("0", "false", "no", "off"):
+                return False
+        return v
     
     # Database: PostgreSQL for production
     DATABASE_URL: str = "postgresql+asyncpg://applivo:password@localhost:5432/applivo"
@@ -70,6 +82,15 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_MAX_TOKENS: int = 4096
     OPENAI_TEMPERATURE: float = 0.3
+
+    # ── Outreach Platform ───────────────────────────────────────────────────
+    SERPER_API_KEY: str = ""          # Serper.dev web search API for company research
+    OUTREACH_DAILY_LIMIT: int = 5     # Default max emails per user per day
+    OUTREACH_MAX_DAILY_LIMIT: int = 15  # Absolute hard cap per user per day
+    OUTREACH_GMAIL_REDIRECT_URI: str = ""  # Gmail OAuth callback URL
+    GITHUB_CLIENT_ID: str = ""        # GitHub OAuth app client ID
+    GITHUB_CLIENT_SECRET: str = ""  # GitHub OAuth app client secret
+    GITHUB_REDIRECT_URI: str = ""   # GitHub OAuth callback URL
     CHROMA_HOST: str = "chroma"
     CHROMA_PORT: int = 8001
     CHROMA_COLLECTION_USER_PROFILE: str = "user_profile"
@@ -121,6 +142,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 Days
     GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""          # Google OAuth2 client secret (for Gmail connector)
+    OUTREACH_GMAIL_REDIRECT_URI: str = "http://localhost:8000/api/v1/outreach/connectors/gmail/callback"
     ENCRYPTION_KEY: str = ""
 
     # ── Sentry Monitoring ──────────────────────────────────────

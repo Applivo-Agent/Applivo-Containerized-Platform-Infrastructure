@@ -22,6 +22,11 @@ from app.models.chat_usage import ChatUsage  # noqa: F401
 from app.models.platform_message import PlatformMessage  # noqa: F401
 from app.models.ai_usage import AIUsageLog  # noqa: F401
 from app.models.chat_message import ChatMessage  # noqa: F401
+from app.models.outreach import (  # noqa: F401
+    OutreachCompany, OutreachIntelligence, OutreachContact,
+    OutreachCampaign, OutreachEmail, OutreachConversation,
+    OutreachEmailConnector, OutreachGitHubConnector, OutreachFollowUp,
+)
 
 __all__ = [
     "UserSettings", "SettingsAuditLog",
@@ -42,4 +47,7 @@ __all__ = [
     "PlatformMessage",
     "ChatMessage",
     "AIUsageLog",
+    "OutreachCompany", "OutreachIntelligence", "OutreachContact",
+    "OutreachCampaign", "OutreachEmail", "OutreachConversation",
+    "OutreachEmailConnector", "OutreachGitHubConnector", "OutreachFollowUp",
 ]

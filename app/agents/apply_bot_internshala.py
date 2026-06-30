@@ -2126,9 +2126,17 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     # ── Cookie Loading ───────────────────────────────────────
     # In multi-user SaaS mode, ALWAYS prefer per-user DB cookies.
     # Only fall back to the legacy shared file for single-user / CLI usage.
+    #
+    # When preloaded_cookies is EXPLICITLY None (not missing), it means the caller
+    # (e.g. persistent context) already has cookies and we should NOT load from DB.
+    # When preloaded_cookies is an empty list [], it means storage_state was already
+    # restored by the caller and we must NOT reload from DB.
+    # When preloaded_cookies is a non-empty list, use those cookies directly.
     cookies: list = []
 
-    if preloaded_cookies:
+    if preloaded_cookies is not None:
+        # preloaded_cookies may be an empty list when storage_state was already
+        # restored by the caller; in that case we must NOT reload from DB.
         cookies = preloaded_cookies if isinstance(preloaded_cookies, list) else [preloaded_cookies]
         logger.info("Using preloaded cookies", user_id=user_id, count=len(cookies))
     elif user_id:
@@ -2152,7 +2160,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
     # No need to re-apply per page
     pass
 
-    # ── Always inject cookies from DB ──────────────────────────
+    # ── Only inject cookies if we have them and not using persistent context ──
     if cookies:
         try:
             await context.add_cookies(cookies)
@@ -2160,7 +2168,7 @@ async def apply_internshala(page, job, profile, resume, settings_obj, user_id: O
         except Exception as e:
             logger.warning("Could not inject cookies", error=str(e))
     else:
-        logger.warning("No cookies available to inject")
+        logger.info("No cookies to inject (persistent context or empty)")
 
     await _goto_lenient(page, "https://internshala.com/", timeout_ms=60000)
     await asyncio.sleep(random.uniform(2, 3))

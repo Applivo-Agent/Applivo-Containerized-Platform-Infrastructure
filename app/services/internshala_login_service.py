@@ -159,9 +159,11 @@ class InternshalaLoginService:
         """
         Open browser, attempt credential-based login, then capture cookies.
         """
-        logger.info("Starting Internshala login")
+        logger.info("Starting Internshala login", user_id=user_id)
         
-        storage_state, fingerprint = await self._perform_login(page_email=email, page_password=password)
+        storage_state, fingerprint = await self._perform_login(
+            user_id=user_id, page_email=email, page_password=password
+        )
         
         if not storage_state:
             return {
@@ -184,7 +186,7 @@ class InternshalaLoginService:
             "needs_captcha": False,
         }
 
-    async def _perform_login(self, page_email: str = "", page_password: str = "") -> Optional[list]:
+    async def _perform_login(self, user_id: str = "", page_email: str = "", page_password: str = "") -> Optional[list]:
         """
         Open browser to Internshala, log in with credentials when available,
         and capture cookies from the authenticated session.
@@ -248,14 +250,23 @@ class InternshalaLoginService:
                     pass
 
             # If persistent user-data dir requested, use launch_persistent_context
-            persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
-            if persistent_dir:
-                # ensure dir exists
+            # Use user-specific subdirectory for multi-user SaaS
+            raw_persistent_dir = os.environ.get("INTERNSHALA_PERSISTENT_DIR") or os.environ.get("INTERNShALA_PERSISTENT_DIR")
+            persistent_dir = None
+            if raw_persistent_dir:
+                if user_id:
+                    safe_user_id = str(user_id).replace("-", "_").replace(" ", "_")
+                    persistent_dir = os.path.join(raw_persistent_dir, safe_user_id)
+                    logger.info("Using user-specific persistent browser context", user_id=user_id, dir=persistent_dir)
+                else:
+                    persistent_dir = raw_persistent_dir
+                    logger.info("Using shared persistent browser context (no user_id)", dir=persistent_dir)
                 try:
                     Path(persistent_dir).mkdir(parents=True, exist_ok=True)
                 except Exception:
                     pass
 
+            if persistent_dir:
                 logger.info("Launching persistent browser context", dir=persistent_dir, headless=headless)
                 context = await playwright.chromium.launch_persistent_context(
                     user_data_dir=persistent_dir,

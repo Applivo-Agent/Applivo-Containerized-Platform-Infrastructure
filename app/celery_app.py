@@ -10,12 +10,10 @@ celery_app = Celery(
     "app",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.celery_tasks"],
+    include=["app.celery_tasks", "app.tasks.outreach_tasks"],
 )
 
-# Keep autodiscovery for conventional task modules while explicitly including
-# app.celery_tasks where this project defines all Celery tasks.
-celery_app.autodiscover_tasks(["app"])
+celery_app.autodiscover_tasks(["app", "app.tasks"])
 
 celery_app.conf.update(
     task_serializer="json",
@@ -108,5 +106,18 @@ celery_app.conf.beat_schedule = {
     "send-monthly-career-reports": {
         "task": "app.celery_tasks.send_monthly_career_reports",
         "schedule": crontab(hour=9, minute=0, day_of_month=1),
+    },
+    # ── Outreach Platform ──────────────────────────────────────────────────────
+    "outreach-send-scheduled-emails": {
+        "task": "app.tasks.outreach_tasks.send_scheduled_outreach_emails",
+        "schedule": crontab(minute="*/15"),          # every 15 minutes
+    },
+    "outreach-poll-replies": {
+        "task": "app.tasks.outreach_tasks.poll_outreach_replies",
+        "schedule": crontab(minute=0),               # every hour
+    },
+    "outreach-schedule-followups": {
+        "task": "app.tasks.outreach_tasks.schedule_outreach_followups",
+        "schedule": crontab(hour=8, minute=30),      # daily at 8:30 AM UTC
     },
 }
