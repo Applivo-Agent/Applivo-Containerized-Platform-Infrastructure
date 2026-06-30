@@ -9,7 +9,7 @@ import {
   MessageSquare, BotMessageSquare, Settings, LogOut, Crown, Zap,
   Users, Shield, ChevronRight, BookOpen,
   TrendingUp, Mail, Bell, Link2, CreditCard,
-  Layers, Target, Star, RefreshCw, Search, Send
+  Layers, Target, Star, RefreshCw, Search, Send, Radio
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAgentStatus } from "@/lib/agent-status";
@@ -32,6 +32,7 @@ const navGroups = [
       { href: "/analytics", icon: BarChart2, label: "Analytics" },
       { href: "/chat", icon: MessageSquare, BotMessageSquare, label: "AI Chat" },
       { href: "/messages", icon: Mail, label: "Messages" },
+      { href: "/outreach", icon: Radio, label: "Outreach" },
     ],
   },
   {
@@ -58,6 +59,7 @@ const navGroups = [
       { href: "/connect", icon: Link2, label: "Connections" },
       { href: "/subscription", icon: CreditCard, label: "Subscription" },
       { href: "/settings", icon: Settings, label: "Settings" },
+      { href: "/outreach/settings", icon: Link2, label: "Connectors" },
       { href: "/security", icon: Shield, label: "Security" },
     ],
   },
@@ -172,14 +174,14 @@ export function Sidebar() {
                         href={isLocked ? "/subscription" : item.href}
                         className={cn(
                           "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative overflow-hidden",
+                          (item as any).indent && "ml-4 py-1.5 text-xs",
                           isActive
                             ? "text-white bg-[#1a1a1a] border border-[#2a2a2a]"
                             : "text-zinc-400 hover:text-zinc-200 hover:bg-[#1a1a1a]",
                           isLocked && "opacity-50"
                         )}
                       >
-                        
-                        <item.icon className={cn("w-4 h-4 shrink-0 transition-colors", isActive ? "text-white" : "text-zinc-500 group-hover:text-zinc-300")} />
+                        <item.icon className={cn("shrink-0 transition-colors", (item as any).indent ? "w-3 h-3" : "w-4 h-4", isActive ? "text-white" : "text-zinc-500 group-hover:text-zinc-300")} />
                         <span className="flex-1">{item.label}</span>
                         {isLocked && <Crown className="w-3.5 h-3.5 text-amber-500/70" />}
                       </Link>
